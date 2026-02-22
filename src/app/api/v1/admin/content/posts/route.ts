@@ -29,7 +29,8 @@ export async function GET(request: NextRequest) {
     else if (status === 'scheduled') query.status = { $in: ['scheduled'] };
     else query.status = { $in: ['published', 'scheduled'] };
 
-    const sortBy = searchParams.get('sort') === 'createdAt' ? { createdAt: -1 } : { updatedAt: -1 };
+    const sortKey = searchParams.get('sort') === 'createdAt' ? 'createdAt' : 'updatedAt';
+    const sortBy: Record<string, 1 | -1> = { [sortKey]: -1 };
 
     const posts = await Post.find(query)
       .populate('categoryId', 'name slug')
