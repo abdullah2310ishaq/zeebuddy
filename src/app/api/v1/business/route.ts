@@ -15,11 +15,18 @@ export async function GET(request: NextRequest) {
       .sort({ createdAt: -1 })
       .lean();
 
+    const servicesForResponse = (b: { services?: string[] | string }): string[] => {
+      const s = b.services;
+      if (Array.isArray(s)) return s;
+      if (typeof s === 'string' && s) return [s];
+      return [];
+    };
+
     return apiSuccess(
       businesses.map((b) => ({
         id: b._id,
         businessName: b.businessName,
-        services: b.services,
+        services: servicesForResponse(b),
         serviceHours: b.serviceHours,
         businessDescription: b.businessDescription,
         businessType: b.businessType,
@@ -35,9 +42,20 @@ export async function GET(request: NextRequest) {
   }
 }
 
+/** Normalize services to array of 1–3 strings for business. */
+function normalizeServices(v: unknown): string[] {
+  if (Array.isArray(v)) {
+    const arr = v.filter((s) => typeof s === 'string').map((s) => String(s).trim()).filter(Boolean);
+    return arr.slice(0, 3);
+  }
+  if (typeof v === 'string' && v.trim()) return [v.trim()];
+  return [];
+}
+
 /**
  * POST /api/v1/business
  * Create new business (admin only - add auth later)
+ * services: string[] (max 3) or single string
  */
 export async function POST(request: NextRequest) {
   try {
@@ -46,7 +64,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const {
       businessName,
-      services,
+      services: servicesRaw,
       serviceHours,
       businessDescription,
       businessType,
@@ -54,8 +72,16 @@ export async function POST(request: NextRequest) {
       images = [],
     } = body;
 
-    if (!businessName || !services || !businessType) {
-      return apiError('businessName, services, and businessType are required', 'VALIDATION_ERROR', 400);
+    if (!businessName || !businessType) {
+      return apiError('businessName and businessType are required', 'VALIDATION_ERROR', 400);
+    }
+
+    const services = normalizeServices(servicesRaw);
+    if (services.length === 0) {
+      return apiError('At least one service is required', 'VALIDATION_ERROR', 400);
+    }
+    if (services.length > 3) {
+      return apiError('Maximum 3 services allowed per business', 'VALIDATION_ERROR', 400);
     }
 
     const business = await Business.create({

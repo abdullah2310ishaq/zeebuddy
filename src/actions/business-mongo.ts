@@ -7,7 +7,8 @@ import { uploadToCloudinary } from '@/lib/cloudinary';
 
 export interface BusinessFormData {
   businessName: string;
-  services: string;
+  /** 1 to 3 services per business */
+  services: string[];
   serviceHours?: string;
   businessDescription?: string;
   businessType: string;
@@ -27,7 +28,7 @@ export interface GetBusinessesResult {
   businesses?: Array<{
     id: string;
     businessName: string;
-    services: string;
+    services: string[];
     serviceHours: string;
     businessDescription: string;
     businessType: string;
@@ -50,17 +51,30 @@ async function uploadFiles(files: File[]): Promise<string[]> {
   return urls;
 }
 
+/** Get 1–3 services from form (getAll or single get). */
+function getServicesFromForm(formData: FormData): string[] {
+  const all = formData.getAll('services');
+  const arr = all
+    .filter((s) => typeof s === 'string' && (s as string).trim())
+    .map((s) => (s as string).trim())
+    .slice(0, 3);
+  return arr;
+}
+
 export async function saveBusinessMongo(formData: FormData): Promise<SaveBusinessResult> {
   try {
     const businessName = formData.get('businessName') as string;
-    const services = formData.get('services') as string;
+    const services = getServicesFromForm(formData);
     const serviceHours = (formData.get('serviceHours') as string) || '';
     const businessDescription = (formData.get('businessDescription') as string) || '';
     const businessType = formData.get('businessType') as string;
     const serviceAreas = (formData.get('serviceAreas') as string) || '';
 
-    if (!businessName || !services || !businessType) {
-      return { success: false, message: 'Business name, services, and business type are required' };
+    if (!businessName || !businessType) {
+      return { success: false, message: 'Business name and business type are required' };
+    }
+    if (services.length === 0) {
+      return { success: false, message: 'At least one service is required (max 3)' };
     }
 
     const imageFiles: File[] = [];
@@ -100,12 +114,15 @@ export async function getBusinessesMongo(): Promise<GetBusinessesResult> {
     await connectDB();
     const businesses = await Business.find({ deletedAt: null }).sort({ createdAt: -1 }).lean();
 
+    const toServices = (s: string[] | string | undefined): string[] =>
+      Array.isArray(s) ? s : typeof s === 'string' && s ? [s] : [];
+
     return {
       success: true,
       businesses: businesses.map((b) => ({
         id: String(b._id),
         businessName: b.businessName,
-        services: b.services,
+        services: toServices(b.services),
         serviceHours: b.serviceHours,
         businessDescription: b.businessDescription,
         businessType: b.businessType,
@@ -130,7 +147,7 @@ export async function updateBusinessMongo(
 ): Promise<{ success: boolean; message: string; business?: GetBusinessesResult['businesses'] extends (infer B)[] | undefined ? B : never }> {
   try {
     const businessName = formData.get('businessName') as string;
-    const services = formData.get('services') as string;
+    const services = getServicesFromForm(formData);
     const serviceHours = (formData.get('serviceHours') as string) || '';
     const businessDescription = (formData.get('businessDescription') as string) || '';
     const businessType = formData.get('businessType') as string;
@@ -148,8 +165,11 @@ export async function updateBusinessMongo(
       imageUrls = [...imageUrls, ...newUrls];
     }
 
-    if (!businessName || !services || !businessType) {
-      return { success: false, message: 'Business name, services, and business type are required' };
+    if (!businessName || !businessType) {
+      return { success: false, message: 'Business name and business type are required' };
+    }
+    if (services.length === 0) {
+      return { success: false, message: 'At least one service is required (max 3)' };
     }
 
     await connectDB();
@@ -170,6 +190,9 @@ export async function updateBusinessMongo(
 
     if (!business) return { success: false, message: 'Business not found' };
 
+    const toServices = (s: string[] | string | undefined): string[] =>
+      Array.isArray(s) ? s : typeof s === 'string' && s ? [s] : [];
+
     revalidatePath('/local-business');
     return {
       success: true,
@@ -177,7 +200,7 @@ export async function updateBusinessMongo(
       business: {
         id: String(business._id),
         businessName: business.businessName,
-        services: business.services,
+        services: toServices(business.services),
         serviceHours: business.serviceHours,
         businessDescription: business.businessDescription,
         businessType: business.businessType,

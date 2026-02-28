@@ -791,7 +791,7 @@ All keys optional. `true` = receive, `false` = opt out.
 **Purpose:** Upcoming events, paginated.  
 **Auth:** None.
 
-**Query params:** `limit` (default 20, max 50), `offset` (default 0).
+**Query params:** `limit` (default 20, max 50), `offset` (default 0), `niche` (optional – filter by niche, e.g. `fitness`, `community`, `workshop`). User app can let users filter events by niche.
 
 **Response (200):**
 ```json
@@ -803,6 +803,8 @@ All keys optional. `true` = receive, `false` = opt out.
         "_id": "...",
         "title": "...",
         "description": "...",
+        "whatHappens": "Workshop, networking, demos...",
+        "niche": "fitness",
         "date": "2025-03-15T00:00:00.000Z",
         "time": "18:00",
         "location": "...",
@@ -819,6 +821,8 @@ All keys optional. `true` = receive, `false` = opt out.
   }
 }
 ```
+`whatHappens`: What will happen at the event (agenda/activities). Show under the event so users know what to expect.  
+`niche`: Category for filtering (user app can offer a niche filter).
 
 ---
 
@@ -826,7 +830,7 @@ All keys optional. `true` = receive, `false` = opt out.
 **Purpose:** Single event detail.  
 **Auth:** None.
 
-**Response (200):** Single event object.
+**Response (200):** Single event object including `title`, `description`, `whatHappens`, `niche`, `date`, `time`, `location`, `media`, `attendeesCount`, `createdBy`, etc.
 
 ---
 
@@ -869,7 +873,7 @@ or `"status": "interested"`. Default is `going`.
 ## 4.6 Business
 
 ### GET /api/v1/business
-**Purpose:** List all businesses.  
+**Purpose:** List all businesses.
 **Auth:** None.
 
 **Response (200):**
@@ -880,7 +884,7 @@ or `"status": "interested"`. Default is `going`.
     {
       "_id": "...",
       "businessName": "...",
-      "services": "...",
+      "services": ["care", "groom"],
       "serviceHours": "...",
       "businessDescription": "...",
       "businessType": "...",
@@ -892,14 +896,15 @@ or `"status": "interested"`. Default is `going`.
   ]
 }
 ```
+`services`: Array of 1–3 strings (max 3 per business).
 
 ---
 
 ### GET /api/v1/business/:id
-**Purpose:** Single business detail.  
+**Purpose:** Single business detail.
 **Auth:** None.
 
-**Response (200):** Single business object.
+**Response (200):** Single business object. `services` is an array of 1–3 strings.
 
 ---
 
@@ -1023,34 +1028,83 @@ or `"status": "interested"`. Default is `going`.
 
 ## 5.1 Overview
 
-- **Backend:** Uses Firebase Admin SDK to send FCM messages.
+- **Backend:** Uses Firebase Admin SDK to send FCM messages (same Firebase project as web/admin).
 - **User app:** Registers FCM token via `POST /api/v1/user/fcm-token` after login.
 - **Admin panel:** Sends broadcast or targeted notifications via backend.
 
-## 5.2 Client Setup (Firebase)
+## 5.2 Critical: Use the Same Firebase Project Everywhere
+
+**The user app and the web/admin app must use the same Firebase project.** Otherwise you will get `messaging/mismatched-credential` / **SenderId mismatch** and push will fail.
+
+| App | What to use |
+|-----|-------------|
+| **Web / Admin** | Firebase project whose **service account** credentials are set in backend env: `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`. |
+| **User app (React Native / Flutter)** | **Same** Firebase project: use the **same** `google-services.json` (Android) and **same** `GoogleService-Info.plist` (iOS) from that project. |
+
+**How to ensure they match:**
+
+1. In Firebase Console, open the **same project** that the backend uses (check backend env `FIREBASE_PROJECT_ID`).
+2. In that project: Project settings → Your apps → add or select your **Android** and **iOS** apps.
+3. Download **google-services.json** (Android) and **GoogleService-Info.plist** (iOS) from this project only.
+4. Put **google-services.json** in the user app (e.g. `android/app/google-services.json`).
+5. Put **GoogleService-Info.plist** in the user app (e.g. `ios/Runner/GoogleService-Info.plist`).
+6. Do **not** use config from a different Firebase project. One project for backend + web + user app.
+
+## 5.3 Client Setup (Firebase) – User App
 
 ### Android
-1. Add Firebase to project: `google-services.json` in `android/app/`.
-2. Add dependencies: `@react-native-firebase/app`, `@react-native-firebase/messaging`.
+1. Add Firebase using the **same project’s** `google-services.json` in `android/app/`.
+2. Add dependencies: `@react-native-firebase/app`, `@react-native-firebase/messaging` (or Flutter equivalents).
 3. Request notification permission.
 4. Get FCM token: `messaging().getToken()`.
-5. On token refresh: `messaging().onTokenRefresh()` → call `POST /api/v1/user/fcm-token` again.
+5. After user logs in, call `POST /api/v1/user/fcm-token` with body `{ "fcmToken": "<token>" }` and header `Authorization: Bearer <user token>`.
+6. On token refresh: `messaging().onTokenRefresh()` → call `POST /api/v1/user/fcm-token` again with the new token.
 
 ### iOS
-1. Add Firebase: `GoogleService-Info.plist`.
-2. Enable Push Notifications capability.
-3. Upload APNs key/certificate to Firebase Console.
-4. Same FCM token flow as Android.
+1. Add Firebase using the **same project’s** `GoogleService-Info.plist`.
+2. Enable Push Notifications capability in Xcode.
+3. Upload APNs key (or certificate) in Firebase Console → Project settings → Cloud Messaging → Apple app config.
+4. Same FCM token flow as Android: get token, then `POST /api/v1/user/fcm-token` after login and on token refresh.
 
 ### General Flow
 ```
-App launch → Check permission → Get FCM token → POST /api/v1/user/fcm-token (after login)
-Token refresh → POST /api/v1/user/fcm-token again
+App launch → Check permission → Get FCM token
+User logs in → POST /api/v1/user/fcm-token with Bearer token and { "fcmToken": "<token>" }
+Token refresh → POST /api/v1/user/fcm-token again with new token
 Foreground message → Handle in onMessage
 Background/quit → Handle in background handler
 ```
 
-## 5.3 Notification Types (from backend)
+## 5.4 Final Checklist: Push in User App (Same Project)
+
+- [ ] Firebase project in user app is the **same** as backend (`FIREBASE_PROJECT_ID`). Same `google-services.json` / `GoogleService-Info.plist` from that project.
+- [ ] User app gets FCM token (e.g. `messaging().getToken()`).
+- [ ] **After login** (and when token is available), call `POST /api/v1/user/fcm-token` with `Authorization: Bearer <user JWT or idToken>` and body `{ "fcmToken": "<token>" }`.
+- [ ] On FCM token refresh, call `POST /api/v1/user/fcm-token` again so the backend always has the latest token.
+- [ ] If you ever see **SenderId mismatch**, see section 5.5 below.
+
+## 5.5 Troubleshooting: SenderId mismatch (`messaging/mismatched-credential`)
+
+When the admin panel sends a push and you see:
+
+- **code:** `messaging/mismatched-credential`
+- **message:** `SenderId mismatch`
+
+it means the FCM token stored in the backend was created by a **different** Firebase project (or an old build) than the one the backend uses to send.
+
+**Even if you use the same project everywhere, this often means:**
+
+1. **Stale token in the database** – The token was registered when the user app was using a different Firebase project or an older build. The backend is sending with the correct project, but the token belongs to another sender.
+2. **User app config was wrong at token creation** – e.g. a different `google-services.json` / `GoogleService-Info.plist` was in the app when the user last logged in and registered the token.
+
+**Fix:**
+
+1. **Confirm same project:** User app must use the **same** Firebase project as the backend (same `google-services.json` and `GoogleService-Info.plist` from the project that matches `FIREBASE_PROJECT_ID` in the backend).
+2. **Re-register the token:** Have the user **open the user app and sign in again** (or reinstall the app and sign in). That will get a new FCM token from the current app config and send it to the backend via `POST /api/v1/user/fcm-token`. The backend will overwrite the old token. After that, send a test push again from the admin panel.
+
+Optional: On app startup, you can always call `POST /api/v1/user/fcm-token` when the user is logged in and you have a fresh FCM token, so the backend always has the latest token.
+
+## 5.6 Notification Types (from backend)
 
 | Type | When | Data payload |
 |------|------|--------------|
@@ -1058,7 +1112,7 @@ Background/quit → Handle in background handler
 | `post_rejected` | Admin rejects user's post | `{ type, postId }` |
 | Admin broadcast | Admin sends from panel | `{ notificationId }` |
 
-## 5.4 User Notification Settings
+## 5.7 User Notification Settings
 
 Users can opt in/out via `PATCH /api/v1/user/settings`:
 
@@ -1066,7 +1120,7 @@ Users can opt in/out via `PATCH /api/v1/user/settings`:
 - `adminPush`: Receive admin-sent broadcasts
 - `eventReminders`: Event reminders (future use)
 
-## 5.5 Handling Notifications
+## 5.8 Handling Notifications
 
 - **Foreground:** Use `messaging().onMessage()` to show in-app banner or update UI.
 - **Background/Terminated:** System tray notification. Optional `data` payload for deep link (e.g. open post by `postId`).
@@ -1124,12 +1178,13 @@ Users can opt in/out via `PATCH /api/v1/user/settings`:
 - [ ] Submit report
 
 ## Push Notifications
+- [ ] **Same Firebase project** as backend (same `google-services.json` / `GoogleService-Info.plist`)
 - [ ] Request permission
 - [ ] Get FCM token
-- [ ] Register token on login
+- [ ] Register token **after login**: `POST /api/v1/user/fcm-token` with Bearer token and `{ "fcmToken": "<token>" }`
 - [ ] Handle foreground messages
 - [ ] Handle background/quit (optional deep link)
-- [ ] Re-register on token refresh
+- [ ] Re-register on token refresh (call fcm-token again)
 
 ---
 
@@ -1138,7 +1193,7 @@ Users can opt in/out via `PATCH /api/v1/user/settings`:
 | Variable | Description |
 |----------|-------------|
 | `API_BASE_URL` | Backend base URL (e.g. `https://api.zeebuddy.com`) |
-| **Firebase config** | From Firebase Console: `apiKey`, `authDomain`, `projectId`, `storageBucket`, `messagingSenderId`, `appId`. Required for Firebase Auth (Google sign-in) and FCM in the user app. Same project as the backend uses for token verification and FCM. |
+| **Firebase config** | From Firebase Console: `apiKey`, `authDomain`, `projectId`, `storageBucket`, `messagingSenderId`, `appId`. Use the **same Firebase project** as the web/admin backend. Same `google-services.json` (Android) and `GoogleService-Info.plist` (iOS) from that project. Required for Auth (Google sign-in) and FCM; otherwise you get SenderId mismatch. |
 
 ---
 
@@ -1151,4 +1206,4 @@ Always check `success` in response. On `success: false`:
 
 ---
 
-**Summary:** This guide is the single source for integrating the **user app** (React Native, Flutter, or any client) with the ZeeBuddy backend. **Firebase Auth works in the user app** for Google sign-in (and optionally email/password); the backend verifies Firebase ID tokens and also issues its own JWT. Use this doc for all user-facing API flows. For admin panel APIs and MongoDB schemas, see **ZEEBUDDY_API_REFERENCE.md**.
+**Summary:** This guide is the single source for integrating the **user app** (React Native, Flutter, or any client) with the ZeeBuddy backend. **Firebase Auth works in the user app** for Google sign-in (and optionally email/password); the backend verifies Firebase ID tokens and also issues its own JWT. **For push notifications, use the same Firebase project everywhere:** same `google-services.json` (Android) and `GoogleService-Info.plist` (iOS) in the user app as the project whose credentials the backend uses (`FIREBASE_PROJECT_ID`). Use this doc for all user-facing API flows. For admin panel APIs and MongoDB schemas, see **ZEEBUDDY_API_REFERENCE.md**.

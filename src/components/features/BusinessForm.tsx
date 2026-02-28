@@ -9,7 +9,7 @@ import { saveBusinessMongo, updateBusinessMongo } from "@/actions/business-mongo
 interface Business {
   id: string;
   businessName: string;
-  services: string;
+  services: string | string[];
   serviceHours: string;
   businessDescription: string;
   businessType: string;
@@ -34,7 +34,12 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
   const queryClient = useQueryClient();
   const isEditing = !!business;
   const [selectedBusinessType, setSelectedBusinessType] = useState<string>(business?.businessType || "");
-  const [selectedServices, setSelectedServices] = useState<string>(business?.services || "");
+  const [selectedServices, setSelectedServices] = useState<string[]>(() => {
+    const s = business?.services;
+    if (Array.isArray(s)) return s.slice(0, 3);
+    if (typeof s === 'string' && s.trim()) return [s.trim()];
+    return [];
+  });
   const [existingImages, setExistingImages] = useState<string[]>(business?.images || []);
   const [imagePreviews, setImagePreviews] = useState<ImagePreview[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -55,10 +60,12 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
   const [businessTypeInput, setBusinessTypeInput] = useState("");
   const [servicesOptions, setServicesOptions] = useState<string[]>(() => {
     const defaults = ["care", "food", "bath", "groom"];
-    if (business?.services) {
-      const svc = business.services.toLowerCase();
-      if (!defaults.includes(svc)) return [...defaults, svc];
-    }
+    const s = business?.services;
+    const arr = Array.isArray(s) ? s : typeof s === 'string' && s ? [s] : [];
+    arr.forEach((svc) => {
+      const lower = String(svc).toLowerCase();
+      if (lower && !defaults.includes(lower)) defaults.push(lower);
+    });
     return defaults;
   });
   const [servicesInput, setServicesInput] = useState("");
@@ -82,15 +89,27 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
     if (e.key !== "Enter" || !servicesInput.trim()) return;
     e.preventDefault();
     const name = servicesInput.trim().toLowerCase();
-    const existing = servicesOptions.find((s) => s.toLowerCase() === name);
-    if (existing) {
-      setSelectedServices(existing);
+    if (selectedServices.length >= 3) return;
+    const already = selectedServices.some((s) => s.toLowerCase() === name);
+    if (already) {
       setServicesInput("");
       return;
     }
-    setServicesOptions((prev) => [...prev, name]);
-    setSelectedServices(name);
+    const existingOpt = servicesOptions.find((s) => s.toLowerCase() === name);
+    if (!existingOpt) setServicesOptions((prev) => [...prev, name]);
+    setSelectedServices((prev) => [...prev, name].slice(0, 3));
     setServicesInput("");
+  };
+
+  const handleServicesSelect = (service: string) => {
+    const lower = service.toLowerCase();
+    if (selectedServices.some((s) => s.toLowerCase() === lower)) return;
+    if (selectedServices.length >= 3) return;
+    setSelectedServices((prev) => [...prev, lower].slice(0, 3));
+  };
+
+  const handleRemoveService = (index: number) => {
+    setSelectedServices((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
@@ -121,16 +140,16 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
     setSelectedBusinessType(type);
   };
 
-  const handleServicesSelect = (service: string) => {
-    setSelectedServices(service);
-  };
-
   const handleRemoveExistingImage = (index: number) => {
     setExistingImages((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (selectedServices.length === 0) {
+      setSubmitMessage({ type: 'error', text: 'Select at least one service (max 3).' });
+      return;
+    }
     setIsSubmitting(true);
     setSubmitMessage(null);
 
@@ -153,7 +172,7 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
       }
       
       if (result.success) {
-        setSubmitMessage({ type: 'success', text: result.message });
+            setSubmitMessage({ type: 'success', text: result.message });
         queryClient.invalidateQueries({ queryKey: ["businesses"] });
         
         if (onSuccess) {
@@ -163,7 +182,7 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
           if (!isEditing) {
             formRef.current?.reset();
             setSelectedBusinessType('');
-            setSelectedServices('');
+            setSelectedServices([]);
             setImagePreviews([]);
             setExistingImages([]);
             // Clear image previews URLs
@@ -220,35 +239,67 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
             />
           </div>
 
-          {/* Services */}
+          {/* Services (max 3) */}
           <div>
             <label className="block text-sm font-medium text-gray-900 mb-2">
-              Services
+              Services (max 3)
             </label>
+            {selectedServices.map((s, index) => (
+              <input key={`${s}-${index}`} type="hidden" name="services" value={s} />
+            ))}
             <div className="space-y-2">
-              <select
-                name="services"
-                value={selectedServices}
-                onChange={(e) => setSelectedServices(e.target.value)}
-                required
-                className="w-full h-12 px-4 border-2 border-red-600 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-red-600 text-sm cursor-pointer capitalize"
-              >
-                <option value="">Select or type below</option>
-                {servicesOptions.map((service) => (
-                  <option key={service} value={service}>
-                    {service}
-                  </option>
-                ))}
-              </select>
-              <input
-                ref={servicesInputRef}
-                type="text"
-                value={servicesInput}
-                onChange={(e) => setServicesInput(e.target.value)}
-                onKeyDown={handleServicesKeyDown}
-                placeholder="Type new service and press Enter to add"
-                className="w-full h-12 px-4 border-2 border-red-600 rounded-xl bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-red-600 text-sm"
-              />
+              {selectedServices.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {selectedServices.map((s, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-red-100 text-red-800 text-sm capitalize"
+                    >
+                      {s}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveService(i)}
+                        className="p-0.5 rounded hover:bg-red-200"
+                        aria-label={`Remove ${s}`}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {selectedServices.length < 3 && (
+                <>
+                  <select
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v) handleServicesSelect(v);
+                      e.target.value = '';
+                    }}
+                    className="w-full h-12 px-4 border-2 border-red-600 rounded-xl bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-red-600 text-sm cursor-pointer capitalize"
+                  >
+                    <option value="">Select a service</option>
+                    {servicesOptions
+                      .filter((opt) => !selectedServices.some((s) => s.toLowerCase() === opt.toLowerCase()))
+                      .map((service) => (
+                        <option key={service} value={service}>
+                          {service}
+                        </option>
+                      ))}
+                  </select>
+                  <input
+                    ref={servicesInputRef}
+                    type="text"
+                    value={servicesInput}
+                    onChange={(e) => setServicesInput(e.target.value)}
+                    onKeyDown={handleServicesKeyDown}
+                    placeholder="Or type new service and press Enter (max 3)"
+                    className="w-full h-12 px-4 border-2 border-red-600 rounded-xl bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-red-600 text-sm"
+                  />
+                </>
+              )}
             </div>
           </div>
 

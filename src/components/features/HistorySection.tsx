@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api-client";
@@ -14,11 +15,17 @@ interface NotificationItem {
   createdBy?: { name: string; email: string };
 }
 
-export function HistorySection() {
+interface HistorySectionProps {
+  /** When set, show only this many recent items and a "See all" button. Omit for full list. */
+  limit?: number;
+}
+
+export function HistorySection({ limit = 50 }: HistorySectionProps) {
   const { data: notifications = [], isLoading } = useQuery({
-    queryKey: ["push-notifications-history"],
+    queryKey: ["push-notifications-history", limit],
     queryFn: async () => {
-      const res = await apiFetch<NotificationItem[]>("/admin/push-notifications");
+      const url = limit ? `/admin/push-notifications?limit=${limit}` : "/admin/push-notifications";
+      const res = await apiFetch<NotificationItem[]>(url);
       if (!res.success) throw new Error(res.error);
       return res.data ?? [];
     },
@@ -61,10 +68,20 @@ export function HistorySection() {
     );
   }
 
+  const showSeeAll = limit > 0 && limit < 50;
+
   return (
     <section className="bg-white rounded-xl border border-gray-200 p-4 lg:p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-gray-900">History</h2>
+        {showSeeAll && (
+          <Link
+            href="/push-notification/history"
+            className="text-sm font-medium text-red-600 hover:text-red-700"
+          >
+            See all
+          </Link>
+        )}
       </div>
 
       {notifications.length === 0 ? (

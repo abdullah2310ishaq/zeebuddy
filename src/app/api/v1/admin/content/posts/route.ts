@@ -22,8 +22,9 @@ export async function GET(request: NextRequest) {
     const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 100);
     const status = searchParams.get('status'); // published | scheduled | all
 
-    const query: { authorType: string; status?: { $in: string[] } } = {
+    const query: { authorType: string; deletedAt: null; status?: { $in: string[] } } = {
       authorType: 'admin',
+      deletedAt: null,
     };
     if (status === 'published') query.status = { $in: ['published'] };
     else if (status === 'scheduled') query.status = { $in: ['scheduled'] };
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
     const sortKey = searchParams.get('sort') === 'createdAt' ? 'createdAt' : 'updatedAt';
     const sortBy: Record<string, 1 | -1> = { [sortKey]: -1 };
 
-    const posts = await Post.find(query)
+    const posts = await Post.find({ ...query, deletedAt: null })
       .populate('categoryId', 'name slug')
       .sort(sortBy)
       .limit(limit)

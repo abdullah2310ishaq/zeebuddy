@@ -73,7 +73,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { title, description, date, time, location, media = [], scheduledAt } = body;
+    const { title, description, whatHappens, niche, date, time, location, media = [], scheduledAt } = body;
 
     console.log('[Event:Update] Request received:', {
       id,
@@ -138,6 +138,8 @@ export async function PUT(
         $set: {
           title: title.trim(),
           description: String(description ?? '').trim(),
+          whatHappens: typeof whatHappens === 'string' ? whatHappens.trim() : '',
+          niche: typeof niche === 'string' ? niche.trim() : '',
           date: eventDate,
           time: String(time).trim(),
           location: location.trim(),

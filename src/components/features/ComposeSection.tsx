@@ -4,6 +4,23 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api-client";
 
+interface DeliveryLog {
+  index: number;
+  success: boolean;
+  messageId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+interface SendResult {
+  id?: string;
+  successCount: number;
+  failureCount: number;
+  totalTokens?: number;
+  message?: string;
+  deliveryLogs?: DeliveryLog[];
+}
+
 interface ComposeSectionProps {
   onPreviewChange?: (title: string, body: string) => void;
 }
@@ -12,28 +29,30 @@ export function ComposeSection({ onPreviewChange }: ComposeSectionProps) {
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-
+  const [lastResult, setLastResult] = useState<SendResult | null>(null);
 
   const sendMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiFetch<{ id: string; successCount: number; failureCount: number }>(
-        "/admin/push-notifications",
-        {
-          method: "POST",
-          body: JSON.stringify({ title, body }),
-        }
-      );
+      const res = await apiFetch<SendResult>("/admin/push-notifications", {
+        method: "POST",
+        body: JSON.stringify({ title, body }),
+      });
       if (!res.success) throw new Error(res.error);
       return res.data;
     },
     onSuccess: (data) => {
       setTitle("");
       setBody("");
+      setLastResult(data ?? null);
       queryClient.invalidateQueries({ queryKey: ["push-notifications-history"] });
-      alert(`Notification sent! Success: ${data?.successCount ?? 0}, Failed: ${data?.failureCount ?? 0}`);
     },
     onError: (err) => {
-      alert(err instanceof Error ? err.message : "Failed to send notification");
+      setLastResult({
+        successCount: 0,
+        failureCount: 0,
+        deliveryLogs: [],
+        message: err instanceof Error ? err.message : "Failed to send notification",
+      });
     },
   });
 
@@ -89,6 +108,59 @@ export function ComposeSection({ onPreviewChange }: ComposeSectionProps) {
             {sendMutation.isPending ? "Sending..." : "Send Notifications"}
           </button>
         </div>
+
+        {/* Detailed logs from last send */}
+        {lastResult && (
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <h3 className="text-sm font-semibold text-gray-900 mb-2">Last send result</h3>
+            <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 font-mono text-sm space-y-2">
+              <p>
+                <span className="text-gray-600">Summary:</span> Success: {lastResult.successCount}, Failed:{" "}
+                {lastResult.failureCount}
+                {lastResult.totalTokens != null && ` (${lastResult.totalTokens} token(s) total)`}
+              </p>
+              {lastResult.message && (
+                <p className="text-amber-700">{lastResult.message}</p>
+              )}
+              {lastResult.deliveryLogs && lastResult.deliveryLogs.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-gray-600 mb-2">Per-token delivery:</p>
+                  <ul className="space-y-1.5 list-none">
+                    {lastResult.deliveryLogs.map((log) => (
+                      <li key={log.index} className="flex flex-wrap gap-x-2 gap-y-0.5">
+                        <span className="text-gray-700">Token #{log.index}:</span>
+                        {log.success ? (
+                          <span className="text-green-700">OK</span>
+                        ) : (
+                          <>
+                            <span className="text-red-700">Failed</span>
+                            {log.errorCode && (
+                              <span className="text-red-600">code={log.errorCode}</span>
+                            )}
+                            {log.errorMessage && (
+                              <span className="text-red-600 break-all">message={log.errorMessage}</span>
+                            )}
+                          </>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  {lastResult.deliveryLogs.some(
+                    (l) =>
+                      !l.success &&
+                      (l.errorCode?.includes("mismatched-credential") || l.errorMessage?.toLowerCase().includes("senderid"))
+                  ) && (
+                    <p className="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-600">
+                      <strong>SenderId mismatch?</strong> Even with the same Firebase project, this usually means the
+                      stored FCM token is old (e.g. from a previous build). Have the user open the app and sign in again
+                      so a new token is sent via <code className="bg-gray-200 px-1 rounded">POST /api/v1/user/fcm-token</code>.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );

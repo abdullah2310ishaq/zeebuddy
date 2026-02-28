@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { title, description, date, time, location, media = [], scheduledAt } = body;
+    const { title, description, whatHappens, niche, date, time, location, media = [], scheduledAt } = body;
 
     console.log('[Event:Create] Request body received:', {
       title: title?.slice?.(0, 50),
@@ -129,6 +129,8 @@ export async function POST(request: NextRequest) {
     const rawDoc = {
       title: createPayload.title,
       description: createPayload.description,
+      whatHappens: typeof whatHappens === 'string' ? whatHappens.trim() : '',
+      niche: typeof niche === 'string' ? niche.trim() : '',
       date: createPayload.date,
       time: createPayload.time,
       location: createPayload.location,

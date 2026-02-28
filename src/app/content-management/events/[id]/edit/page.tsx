@@ -28,6 +28,8 @@ export default function EditEventPage() {
 
   const [eventTitle, setEventTitle] = useState('');
   const [eventDescription, setEventDescription] = useState('');
+  const [eventWhatHappens, setEventWhatHappens] = useState('');
+  const [eventNiche, setEventNiche] = useState('');
   const [eventDate, setEventDate] = useState('');
   const [eventTime, setEventTime] = useState('');
   const [eventLocation, setEventLocation] = useState('');
@@ -119,6 +121,8 @@ export default function EditEventPage() {
       body: JSON.stringify({
         title: eventTitle.trim(),
         description: eventDescription.trim(),
+        whatHappens: eventWhatHappens.trim() || undefined,
+        niche: eventNiche.trim() || undefined,
         date: eventDate,
         time: eventTime,
         location: eventLocation.trim(),
@@ -176,6 +180,16 @@ export default function EditEventPage() {
                   <div>
                     <label className="block text-sm font-semibold text-black mb-2">Description</label>
                     <textarea value={eventDescription} onChange={(e) => setEventDescription(e.target.value)} placeholder="Describe the event..." rows={3} className="w-full rounded-lg border-2 border-black bg-white px-4 py-3 text-sm font-medium text-black placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-black" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-black mb-2">What will happen (agenda / activities)</label>
+                    <textarea value={eventWhatHappens} onChange={(e) => setEventWhatHappens(e.target.value)} placeholder="E.g. Workshop, networking, demos..." rows={2} className="w-full rounded-lg border-2 border-black bg-white px-4 py-3 text-sm font-medium text-black placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-black" />
+                    <p className="mt-1 text-xs text-gray-500">Shown under the event so users know what to expect. Used for filtering on the user app.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-black mb-2">Niche (for user filter)</label>
+                    <input type="text" value={eventNiche} onChange={(e) => setEventNiche(e.target.value)} placeholder="E.g. fitness, community, workshop" className="w-full h-11 rounded-lg border-2 border-black bg-white px-4 text-sm font-medium text-black placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-black" />
+                    <p className="mt-1 text-xs text-gray-500">Users can filter events by this on the app.</p>
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-black mb-2">Event image <span className="text-red-600">*</span></label>

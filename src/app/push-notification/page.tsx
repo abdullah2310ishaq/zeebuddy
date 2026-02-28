@@ -34,7 +34,7 @@ export default function PushNotificationPage() {
         <div className="flex flex-col h-full">
           <PushHeader onMenuToggle={handleMenuToggle} />
           <div className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-8">
-            <HistorySection />
+            <HistorySection limit={5} />
             <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 lg:gap-8">
               <ComposeSection onPreviewChange={(t, b) => { setPreviewTitle(t); setPreviewBody(b); }} />
               <PreviewSection title={previewTitle} body={previewBody} />
