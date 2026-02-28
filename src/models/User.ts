@@ -13,6 +13,8 @@ export interface IUser extends Document {
   firebaseUid?: string;
   role: 'user' | 'admin';
   name: string;
+  firstName?: string;
+  lastName?: string;
   avatarUrl?: string;
   fcmToken?: string;
   notificationSettings?: INotificationSettings;
@@ -29,6 +31,8 @@ const UserSchema = new Schema<IUser>(
     firebaseUid: { type: String, sparse: true },
     role: { type: String, enum: ['user', 'admin'], default: 'user' },
     name: { type: String, required: true },
+    firstName: { type: String },
+    lastName: { type: String },
     avatarUrl: { type: String },
     fcmToken: { type: String },
     notificationSettings: {

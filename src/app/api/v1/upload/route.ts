@@ -33,6 +33,10 @@ export async function POST(request: NextRequest) {
       return apiError('Invalid folder. Must be: posts, businesses, avatars, events', 'VALIDATION_ERROR', 400);
     }
 
+    if (folder === 'avatars' && type !== 'image') {
+      return apiError('Avatar uploads must be images only (use type=image)', 'VALIDATION_ERROR', 400);
+    }
+
     const result = await uploadToCloudinary(file, folder, type);
     console.log('[Upload] Cloudinary success:', { url: result.url, publicId: result.publicId });
 

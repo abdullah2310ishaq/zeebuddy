@@ -33,7 +33,10 @@ export async function POST(request: NextRequest) {
       return apiError('Invalid or expired code', 'INVALID_OTP', 400);
     }
 
-    await Otp.findByIdAndDelete(otpRecord._id);
+    // For 'verification' (sign-up), do not delete OTP here; confirm-sign-up will consume it
+    if (purpose !== 'verification') {
+      await Otp.findByIdAndDelete(otpRecord._id);
+    }
 
     return apiSuccess(
       { verified: true, message: 'Code verified successfully' },

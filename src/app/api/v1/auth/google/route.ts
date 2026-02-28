@@ -2,17 +2,18 @@ import { NextRequest } from 'next/server';
 import { connectDB } from '@/lib/db';
 import { User } from '@/models';
 import { verifyIdToken } from '@/lib/firebase-admin';
+import { createUserToken } from '@/lib/jwt';
 import { apiSuccess, apiError } from '@/lib/api-response';
 
 /**
  * POST /api/v1/auth/google
- * Google sign-in (Firebase Auth → link to user)
+ * Google sign-in (Firebase Auth → link to user). Returns user + token.
  * Body: { idToken: string }
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { idToken } = body;
+    const idToken = typeof body?.idToken === 'string' ? body.idToken.trim() : '';
 
     if (!idToken) {
       return apiError('idToken is required', 'MISSING_TOKEN', 400);
@@ -42,9 +43,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const userObj = user.toObject ? user.toObject() : user;
-    const { passwordHash, ...safeUser } = userObj as unknown as Record<string, unknown>;
-    return apiSuccess({ user: safeUser, message: 'Signed in successfully' });
+    const token = await createUserToken(String(user._id));
+    const userObj = user.toObject ? user.toObject() : (user as unknown as Record<string, unknown>);
+    const { passwordHash, ...safeUser } = userObj as Record<string, unknown>;
+    return apiSuccess({ user: safeUser, token, message: 'Signed in successfully' });
   } catch (err) {
     console.error('Google auth error:', err);
     return apiError('Invalid or expired token', 'UNAUTHORIZED', 401);

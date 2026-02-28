@@ -30,10 +30,7 @@ export async function POST(request: NextRequest) {
 
     const user = await User.findOne({ email: emailTrimmed, deletedAt: null });
     if (!user) {
-      return apiSuccess(
-        { message: 'If this email exists, you will receive a reset code.' },
-        'If this email exists, you will receive a reset code.'
-      );
+      return apiError('Email not registered.', 'EMAIL_NOT_FOUND', 404);
     }
 
     const otp = generateOtp(6);
@@ -42,7 +39,25 @@ export async function POST(request: NextRequest) {
     await Otp.deleteMany({ email: emailTrimmed, purpose: 'reset' });
     await Otp.create({ email: emailTrimmed, otp, purpose: 'reset', expiresAt });
 
-    await sendOtpEmail(emailTrimmed, otp, 'reset');
+    try {
+      await sendOtpEmail(emailTrimmed, otp, 'reset');
+    } catch (emailErr) {
+      const errMsg = emailErr instanceof Error ? emailErr.message : String(emailErr);
+      const errCode = emailErr && typeof emailErr === 'object' && 'code' in emailErr ? (emailErr as { code: string }).code : '';
+      console.error('[Forgot-password] Email send failed:', errCode || errMsg);
+      if (emailErr && typeof emailErr === 'object' && 'response' in emailErr) {
+        console.error('[Forgot-password] SMTP response:', (emailErr as { response: string }).response);
+      }
+      const isDev = process.env.NODE_ENV === 'development';
+      if (isDev) {
+        console.log('[Forgot-password DEV] Use this OTP for', emailTrimmed, ':', otp);
+        return apiSuccess(
+          { message: 'Reset code sent. In development, check server console for OTP.', devOtp: otp },
+          'Reset code sent (see server console in dev).'
+        );
+      }
+      return apiError('Could not send reset code. Try again later.', 'EMAIL_SEND_FAILED', 500);
+    }
 
     return apiSuccess(
       { message: 'Reset code sent to your email. Check your inbox.' },

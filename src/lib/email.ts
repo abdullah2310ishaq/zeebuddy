@@ -1,14 +1,27 @@
 import nodemailer from 'nodemailer';
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: Number(process.env.SMTP_PORT) || 587,
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+// TEMPORARY: fallback when .env is not set. Move to .env.local and remove these before commit/production.
+// Use the Gmail account that owns the App Password (abdullahishaq210909@gmail.com).
+const FALLBACK_SMTP_USER = 'abdullahishaq210909@gmail.com';
+const FALLBACK_SMTP_PASS = 'sckfdkvsyafqpolm'; // App password (ZeeBuddy), no spaces
+
+// Build transporter with current env each time (avoids stale env; strips spaces from Gmail App Password).
+// In development, prefer in-code fallback so .env does not override the working App Password.
+function getTransporter() {
+  const isDev = process.env.NODE_ENV === 'development';
+  const user = isDev ? FALLBACK_SMTP_USER : (process.env.SMTP_USER || FALLBACK_SMTP_USER);
+  const rawPass = isDev ? FALLBACK_SMTP_PASS : (process.env.SMTP_PASS || FALLBACK_SMTP_PASS);
+  const pass = typeof rawPass === 'string' ? rawPass.replace(/\s/g, '') : rawPass;
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = Number(process.env.SMTP_PORT) || 587;
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass },
+    tls: { rejectUnauthorized: true },
+  });
+}
 
 export interface SendEmailOptions {
   to: string | string[];
@@ -19,8 +32,10 @@ export interface SendEmailOptions {
 }
 
 export async function sendEmail({ to, subject, text, html, replyTo }: SendEmailOptions) {
+  const transporter = getTransporter();
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER || FALLBACK_SMTP_USER;
   return transporter.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    from,
     to: Array.isArray(to) ? to.join(', ') : to,
     subject,
     text: text ?? '',

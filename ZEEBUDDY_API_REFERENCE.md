@@ -15,9 +15,9 @@
 | **Push Notifications** | FCM (Firebase Cloud Messaging) |
 | **File Storage** | Cloudinary (images & videos) |
 | **API Docs** | Swagger / OpenAPI 3.x |
-//abdullah
+
 ---
-c
+
 # 2. Current Project State (Admin Panel)
 
 ## 2.1 What Exists
@@ -45,13 +45,14 @@ c
 
 | Endpoint | Method | Status |
 |----------|--------|--------|
-| `/api/v1/auth/sign-up` | POST | ✅ |
-| `/api/v1/auth/sign-in` | POST | ✅ |
-| `/api/v1/auth/google` | POST | ✅ |
+| `/api/v1/auth/sign-up` | POST | ✅ (sends OTP only) |
+| `/api/v1/auth/confirm-sign-up` | POST | ✅ (OTP + create account) |
+| `/api/v1/auth/sign-in` | POST | ✅ (returns user + token) |
+| `/api/v1/auth/google` | POST | ✅ (returns user + token) |
 | `/api/v1/auth/forgot-password` | POST | ✅ |
 | `/api/v1/auth/verify-otp` | POST | ✅ |
 | `/api/v1/auth/reset-password` | POST | ✅ |
-| `/api/v1/auth/refresh` | POST | ✅ |
+| `/api/v1/auth/refresh` | POST | ✅ (accepts user JWT or Firebase token) |
 | `/api/v1/user/fcm-token` | POST | ✅ |
 | `/api/v1/user/profile` | GET, PATCH | ✅ |
 | `/api/v1/user/change-password` | PATCH | ✅ |
@@ -170,6 +171,8 @@ c
   firebaseUid: String,     // for Google-linked users
   role: "user" | "admin",
   name: String,
+  firstName: String,   // optional, for email/password sign-up
+  lastName: String,    // optional, for email/password sign-up
   avatarUrl: String,
   fcmToken: String,        // for push notifications
   createdAt: Date,
@@ -254,10 +257,12 @@ c
   title: String,
   description: String,
   date: Date,
-  time: String,            // or store as ISO datetime
+  time: String,
   location: String,
+  media: [{ url: String, type: "image" | "video", publicId?: String }],
   createdBy: ObjectId,     // admin
   attendeesCount: Number,
+  scheduledAt: Date | null,  // optional: when to publish event publicity
   createdAt: Date,
   updatedAt: Date,
   deletedAt: Date | null
@@ -347,92 +352,118 @@ All APIs return:
 
 ## 5.2 User App APIs
 
-**Total: 32 APIs** (for React Native user app)
+**Total: 32 APIs** (for React Native user app) — **All implemented** ✅
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Auth | 7 | ✅ 6 built (sign-up, sign-in, google, forgot-password, verify-otp, reset-password) |
-| FCM Token | 1 | 🔲 To build |
-| Profile & Settings | 3 | 🔲 To build |
-| News (Feed) | 3 | 🔲 To build |
-| Posts (Create, Like, Comment) | 8 | 🔲 To build |
-| Events | 4 | 🔲 To build |
-| Businesses | 4 | 🔲 To build |
-| Reports | 2 | 🔲 To build |
+| Auth | 7 | ✅ All built |
+| FCM Token | 1 | ✅ Built |
+| Profile & Settings | 5 | ✅ All built |
+| News (Feed) | 2 | ✅ Built |
+| Categories | 1 | ✅ Built |
+| Posts (Create, Like, Comment) | 8 | ✅ All built |
+| Events | 4 | ✅ All built |
+| Businesses | 4 | ✅ All built |
+| Reports | 2 | ✅ All built |
+| Upload | 1 | ✅ Built (Cloudinary) |
 
 ---
 
 ### Auth
 
-| API | Method | Purpose |
-|-----|--------|---------|
-| `/api/v1/auth/sign-up` | POST | Register (email + password) |
-| `/api/v1/auth/sign-in` | POST | Login (email/password or OTP) |
-| `/api/v1/auth/google` | POST | Google sign-in (Firebase Auth → link to user) |
-| `/api/v1/auth/forgot-password` | POST | Request OTP for reset |
-| `/api/v1/auth/reset-password` | POST | Reset password (verify OTP) |
-| `/api/v1/auth/verify-otp` | POST | Verify OTP |
-| `/api/v1/auth/refresh` | POST | Refresh token |
+| API | Method | Auth | Request Body | Notes |
+|-----|--------|------|--------------|-------|
+| `/api/v1/auth/sign-up` | POST | No | `{ email, firstName, lastName, password }` | Step 1: If email exists → `EMAIL_EXISTS`. Else sends 6-digit OTP to email (purpose `verification`). Account created only after confirm-sign-up. |
+| `/api/v1/auth/confirm-sign-up` | POST | No | `{ email, otp, password, firstName, lastName }` | Step 2: Verifies OTP (verification), creates user, returns `{ user, token }`. |
+| `/api/v1/auth/sign-in` | POST | No | `{ email, password }` | Returns `{ user, token }`. Returns `USE_GOOGLE` if account uses Google. |
+| `/api/v1/auth/google` | POST | No | `{ idToken }` | Firebase ID token. Creates user if not exists. Returns `{ user, token }`. |
+| `/api/v1/auth/forgot-password` | POST | No | `{ email }` | Sends 6-digit OTP email (expires 10 min, purpose `reset`). |
+| `/api/v1/auth/verify-otp` | POST | No | `{ email, otp, purpose? }` | `purpose`: `reset` \| `verification` \| `signin`. For `verification`, OTP is not consumed here (confirm-sign-up consumes it). |
+| `/api/v1/auth/reset-password` | POST | No | `{ email, otp, newPassword }` | Requires valid OTP (purpose `reset`). |
+| `/api/v1/auth/refresh` | POST | Bearer | — | Validates user JWT or Firebase token, returns fresh user. |
 
 ### FCM Token
 
-| API | Method | Purpose |
-|-----|--------|---------|
-| `/api/v1/user/fcm-token` | POST | Register/update FCM device token |
+| API | Method | Auth | Request Body | Notes |
+|-----|--------|------|--------------|-------|
+| `/api/v1/user/fcm-token` | POST | Bearer | `{ fcmToken }` | Register/update device token for push. |
 
 ### Profile & Settings
 
-| API | Method | Purpose |
-|-----|--------|---------|
-| `/api/v1/user/profile` | GET | Get profile |
-| `/api/v1/user/profile` | PATCH | Edit profile |
-| `/api/v1/user/change-password` | PATCH | Change password |
+| API | Method | Auth | Request Body | Notes |
+|-----|--------|------|--------------|-------|
+| `/api/v1/user/profile` | GET | Bearer | — | Returns profile (excludes passwordHash, firebaseUid). Includes avatarUrl. |
+| `/api/v1/user/profile` | PATCH | Bearer | `{ name?, phone?, avatarUrl? }` | Only these fields. `name` required if sent. |
+| `/api/v1/user/profile/avatar` | POST | Bearer | FormData: `file` (image) | Upload avatar image (JPEG/PNG/GIF/WebP, max 5MB). Sets user avatarUrl, returns updated profile. |
+| `/api/v1/user/change-password` | PATCH | Bearer | `{ currentPassword, newPassword }` | Email/password only. Returns `USE_GOOGLE` for Google accounts. |
+| `/api/v1/user/settings` | GET | Bearer | — | Returns `notificationSettings`: postApprovalRejection, adminPush, eventReminders. |
+| `/api/v1/user/settings` | PATCH | Bearer | `{ notificationSettings? }` | Update notification preferences. |
 
-### News (Posts Feed)
+### News (Feed)
 
-| API | Method | Purpose |
-|-----|--------|---------|
-| `/api/v1/news` | GET | News feed (approved only, paginated) |
-| `/api/v1/news/:id` | GET | Single post |
-| `/api/v1/news/categories` | GET | Categories |
+| API | Method | Auth | Query Params | Notes |
+|-----|--------|------|--------------|-------|
+| `/api/v1/news` | GET | No | `limit` (default 20, max 50), `offset`, `categoryId?` | Approved/published only. Sorted by `createdAt` desc. |
+| `/api/v1/news/:id` | GET | No | — | Single post with populated categoryId. |
+
+### Categories
+
+| API | Method | Auth | Notes |
+|-----|--------|------|-------|
+| `/api/v1/categories` | GET | No | All categories, sorted by name. Used for news feed filters. |
 
 ### Posts (Create, Like, Comment, Reply)
 
-| API | Method | Purpose |
-|-----|--------|---------|
-| `/api/v1/posts` | POST | Create post (image/video) — pending |
-| `/api/v1/posts/:id/like` | POST | Like |
-| `/api/v1/posts/:id/like` | DELETE | Unlike |
-| `/api/v1/posts/:id/share` | POST | Share |
-| `/api/v1/posts/:id/comments` | GET | Get comments (with replies) |
-| `/api/v1/posts/:id/comments` | POST | Add comment |
-| `/api/v1/comments/:id/reply` | POST | Reply to comment |
-| `/api/v1/comments/:id/like` | POST | Like comment |
+| API | Method | Auth | Request Body | Notes |
+|-----|--------|------|--------------|-------|
+| `/api/v1/posts` | POST | Bearer | `{ title, content?, media: [{ url, type, publicId? }], categoryId, expiryAt? }` | Status `pending` (admin approval). `postType` auto from media. |
+| `/api/v1/posts/:id/like` | POST | Bearer | — | Idempotent. Increments likesCount. |
+| `/api/v1/posts/:id/like` | DELETE | Bearer | — | Unlike. Decrements likesCount. |
+| `/api/v1/posts/:id/share` | POST | Bearer | — | Increments sharesCount. |
+| `/api/v1/posts/:id/comments` | GET | No | `limit` (50), `offset` | Top-level + nested replies. Sorted desc/asc. |
+| `/api/v1/posts/:id/comments` | POST | Bearer | `{ content }` | Add top-level comment. |
+| `/api/v1/comments/:id/reply` | POST | Bearer | `{ content }` | Reply to comment. |
+| `/api/v1/comments/:id/like` | POST | Bearer | — | Like comment. Idempotent. |
 
 ### Events
 
-| API | Method | Purpose |
-|-----|--------|---------|
-| `/api/v1/events` | GET | Upcoming events |
-| `/api/v1/events/:id` | GET | Event detail |
-| `/api/v1/events/:id/going` | POST | Book / going |
-| `/api/v1/events/:id/going` | DELETE | Cancel booking |
+| API | Method | Auth | Request Body | Query Params | Notes |
+|-----|--------|------|--------------|--------------|-------|
+| `/api/v1/events` | GET | No | — | `limit`, `offset` | Upcoming only (`date >= now`). Sorted by date asc. |
+| `/api/v1/events/:id` | GET | No | — | — | Event detail with createdBy. |
+| `/api/v1/events/:id/going` | POST | Bearer | `{ status?: 'going' \| 'interested' }` | — | Book event. Default `going`. Updates attendeesCount. |
+| `/api/v1/events/:id/going` | DELETE | Bearer | — | — | Cancel booking. Decrements attendeesCount. |
 
 ### Businesses
 
-| API | Method | Purpose |
-|-----|--------|---------|
-| `/api/v1/business` | GET | List businesses |
-| `/api/v1/business/:id` | GET | Business detail |
-| `/api/v1/business/:id/booking` | POST | Book service |
-| `/api/v1/categories` | GET | Categories (shared with news) |
+| API | Method | Auth | Request Body | Notes |
+|-----|--------|------|--------------|-------|
+| `/api/v1/business` | GET | No | — | All non-deleted. Sorted by createdAt desc. |
+| `/api/v1/business/:id` | GET | No | — | Business detail. |
+| `/api/v1/business/:id/booking` | POST | Bearer | `{ notes? }` | Creates booking (status `pending`). Prevents duplicates. |
 
 ### Reports
 
-| API | Method | Purpose |
-|-----|--------|---------|
-| `/api/v1/reports` | POST | Report content |
-| `/api/v1/reports/types` | GET | Report types |
+| API | Method | Auth | Request Body | Notes |
+|-----|--------|------|--------------|-------|
+| `/api/v1/reports` | POST | Bearer | `{ targetType: 'post' \| 'comment' \| 'user', targetId, reportType, reason? }` | `reportType` from `/reports/types`. Status `pending`. |
+| `/api/v1/reports/types` | GET | No | — | Available report types for dropdown. |
+
+### Upload
+
+| API | Method | Auth | Request (FormData) | Notes |
+|-----|--------|------|-------------------|-------|
+| `/api/v1/upload` | POST | No | `file` (required), `folder?` (posts \| businesses \| avatars \| events), `type?` (image \| video) | Cloudinary. Videos max 60s. Returns `{ url, publicId, secureUrl, duration? }`. |
+
+---
+
+### User API Response Format
+
+**Success:** `{ "success": true, "data": {...}, "message": "..." }`  
+**Error:** `{ "success": false, "error": "...", "code": "ERROR_CODE" }`
+
+**Auth:** Bearer token: `Authorization: Bearer <firebaseIdToken | jwt>`  
+**Status codes:** 200 OK, 201 Created, 400 Bad Request, 401 Unauthorized, 404 Not Found, 500 Server Error
 
 ---
 
@@ -477,7 +508,7 @@ All APIs return:
 
 | API | Method | Purpose |
 |-----|--------|---------|
-| `/api/v1/admin/content/posts` | GET | All posts ✅ |
+| `/api/v1/admin/content/posts` | GET | All posts. Query: `?status=scheduled|published|all`, `?sort=updatedAt|createdAt`, `?limit`, `?offset` ✅ |
 | `/api/v1/admin/content/posts` | POST | Create post ✅ |
 | `/api/v1/admin/content/posts/:id` | GET | Single post ✅ |
 | `/api/v1/admin/content/posts/:id` | PUT | Update post ✅ |
@@ -485,8 +516,7 @@ All APIs return:
 | `/api/v1/admin/content/events` | GET | All events ✅ |
 | `/api/v1/admin/content/events` | POST | Create event ✅ |
 | `/api/v1/admin/content/events/:id` | GET, PUT, DELETE | Event CRUD ✅ |
-| `/api/v1/admin/content/last-edited` | GET | Last edited post 🔲 |
-| `/api/v1/admin/content/scheduled` | GET | Scheduled posts 🔲 |
+| Last edited / Scheduled | — | Use `GET /admin/content/posts?sort=updatedAt` and `?status=scheduled` |
 | `/api/v1/admin/content/posts/:id/schedule` | PATCH | Schedule 🔲 |
 | `/api/v1/admin/content/posts/:id/publish` | PATCH | Publish 🔲 |
 

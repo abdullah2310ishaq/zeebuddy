@@ -1,19 +1,30 @@
 import { verifyIdToken } from './firebase-admin';
-import { verifyAdminToken } from './jwt';
+import { verifyAdminToken, verifyUserToken } from './jwt';
 import { User } from '@/models';
 import { connectDB } from './db';
 
 export async function getAuthUser(authHeader: string | null) {
   if (!authHeader?.startsWith('Bearer ')) return null;
-  const token = authHeader.slice(7);
+  const token = authHeader.slice(7).trim();
   if (!token) return null;
 
   try {
-    const jwtPayload = await verifyAdminToken(token);
-    if (jwtPayload) {
+    const adminPayload = await verifyAdminToken(token);
+    if (adminPayload) {
       await connectDB();
-      const user = await User.findOne({ _id: jwtPayload.userId, deletedAt: null }).lean();
+      const user = await User.findOne({ _id: adminPayload.userId, deletedAt: null }).lean();
       return user;
+    }
+  } catch {
+    /* try user JWT then Firebase */
+  }
+
+  try {
+    const userPayload = await verifyUserToken(token);
+    if (userPayload) {
+      await connectDB();
+      const user = await User.findOne({ _id: userPayload.userId, deletedAt: null }).lean();
+      return user ?? null;
     }
   } catch {
     /* try Firebase */
@@ -26,7 +37,7 @@ export async function getAuthUser(authHeader: string | null) {
       $or: [{ firebaseUid: decoded.uid }, { email: decoded.email }],
       deletedAt: null,
     }).lean();
-    return user;
+    return user ?? null;
   } catch {
     return null;
   }
