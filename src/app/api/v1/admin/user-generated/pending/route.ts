@@ -21,21 +21,27 @@ export async function GET(request: NextRequest) {
       deletedAt: null,
     })
       .sort({ createdAt: -1 })
-      .populate('authorId', 'name email avatarUrl')
+      .populate('authorId', '_id name email avatarUrl')
       .populate('categoryId', 'name')
       .lean();
 
+    type PopulatedAuthor = { _id: unknown; name: string; email: string; avatarUrl?: string };
     return apiSuccess(
-      posts.map((p) => ({
-        id: String(p._id),
-        title: p.title,
-        content: p.content,
-        media: p.media,
-        postType: p.postType,
-        category: (p as unknown as { categoryId?: { name: string } }).categoryId,
-        author: (p as unknown as { authorId?: { name: string; email: string; avatarUrl?: string } }).authorId,
-        createdAt: p.createdAt,
-      }))
+      posts.map((p) => {
+        const author = (p as unknown as { authorId?: PopulatedAuthor }).authorId;
+        return {
+          id: String(p._id),
+          title: p.title,
+          content: p.content,
+          media: p.media,
+          postType: p.postType,
+          category: (p as unknown as { categoryId?: { name: string } }).categoryId,
+          author: author
+            ? { id: String(author._id), name: author.name, email: author.email, avatarUrl: author.avatarUrl }
+            : undefined,
+          createdAt: p.createdAt,
+        };
+      })
     );
   } catch (err) {
     console.error('Pending posts error:', err);

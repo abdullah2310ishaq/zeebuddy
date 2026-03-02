@@ -13,7 +13,7 @@ interface UserPost {
   media?: { url: string; type: string }[];
   postType?: string;
   category?: { name: string };
-  author?: { name: string; email: string; avatarUrl?: string };
+  author?: { id: string; name: string; email: string; avatarUrl?: string };
   status: "approved" | "published" | "pending" | "rejected" | "scheduled";
   createdAt: string;
 }
@@ -123,7 +123,21 @@ export function UserGeneratedAllPostsList() {
                   </p>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
                     {post.category?.name && <span>{post.category.name}</span>}
-                    {post.author?.name && <span>· by {post.author.name}</span>}
+                    {post.author && (
+                      <span className="flex items-center gap-1.5">
+                        <span className="relative h-5 w-5 shrink-0 rounded-full overflow-hidden bg-gray-200">
+                          {post.author.avatarUrl ? (
+                            <img src={post.author.avatarUrl} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <span className="flex h-full w-full items-center justify-center text-[10px] font-medium text-gray-500">
+                              {(post.author.name || "?").charAt(0).toUpperCase()}
+                            </span>
+                          )}
+                        </span>
+                        <span>by {post.author.name}</span>
+                        <span className="text-gray-400">(ID: {post.author.id})</span>
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex sm:flex-col justify-end gap-2 shrink-0">

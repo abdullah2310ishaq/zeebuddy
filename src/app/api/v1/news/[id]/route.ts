@@ -26,13 +26,21 @@ export async function GET(
       deletedAt: null,
     })
       .populate('categoryId', 'name slug')
+      .populate('authorId', '_id name avatarUrl')
       .lean();
 
     if (!post) {
       return apiError('Post not found', 'NOT_FOUND', 404);
     }
 
-    return apiSuccess(post);
+    type PopulatedAuthor = { _id: unknown; name: string; avatarUrl?: string };
+    const authorDoc = (post as unknown as { authorId?: PopulatedAuthor }).authorId;
+    const author =
+      post.authorType === 'user' && authorDoc
+        ? { id: String(authorDoc._id), name: authorDoc.name, avatarUrl: authorDoc.avatarUrl }
+        : undefined;
+
+    return apiSuccess({ ...post, author });
   } catch (err) {
     console.error('Get news error:', err);
     return apiError('Failed to fetch news', 'SERVER_ERROR', 500);

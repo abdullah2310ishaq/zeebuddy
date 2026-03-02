@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { COLORS } from "@/constants/colors";
+import { apiFetch } from "@/lib/api-client";
+import { useState } from "react";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 
 interface Business {
   id: string;
   businessName: string;
-  services: string;
+  services: string[];
   serviceHours: string;
   businessDescription: string;
   businessType: string;
@@ -22,6 +25,7 @@ const APP_GRADIENT = `linear-gradient(135deg, ${COLORS.GRADIENT_START} 0%, ${COL
 
 function BusinessCard({ business }: { business: Business }) {
   const heroImage = business.images?.[0] || "";
+  const servicesLabel = business.services.join(", ");
 
   return (
     <Link
@@ -68,9 +72,11 @@ function BusinessCard({ business }: { business: Business }) {
                 >
                   {business.businessType}
                 </span>
-                <span className="text-sm text-gray-500 capitalize">
-                  {business.services}
-                </span>
+                {servicesLabel && (
+                  <span className="text-sm text-gray-200 bg-black/30 rounded-full px-3 py-0.5 capitalize">
+                    {servicesLabel}
+                  </span>
+                )}
               </div>
             </div>
             <span className="text-gray-400 group-hover:text-red-600">
@@ -118,15 +124,37 @@ function BusinessCard({ business }: { business: Business }) {
 }
 
 export function BusinessList() {
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["businesses"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/business");
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || "Failed to fetch");
-      return json.data as Business[];
+      const res = await apiFetch<Business[]>("/business");
+      if (!res.success) throw new Error(res.error || "Failed to fetch");
+      return res.data ?? [];
     },
   });
+
+  const [businessToDelete, setBusinessToDelete] = useState<Business | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiFetch<unknown>(`/business/${id}`, { method: "DELETE" });
+      if (!res.success) throw new Error(res.error || "Failed to delete business");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["businesses"] });
+    },
+  });
+
+  const handleConfirmDelete = async () => {
+    if (!businessToDelete) return;
+    try {
+      await deleteMutation.mutateAsync(businessToDelete.id);
+      setBusinessToDelete(null);
+    } catch {
+      // error is surfaced via mutation if needed
+    }
+  };
 
   if (isLoading) {
     return (
@@ -147,15 +175,45 @@ export function BusinessList() {
   const businesses = data ?? [];
 
   return (
-    <div className="space-y-6">
-      <p className="text-sm text-gray-500">
-        {businesses.length} business{businesses.length !== 1 ? "es" : ""} found.
-      </p>
-      <div className="grid gap-6">
-        {businesses.map((business) => (
-          <BusinessCard key={business.id} business={business} />
-        ))}
+    <>
+      <div className="space-y-6">
+        <p className="text-sm text-gray-500">
+          {businesses.length} business{businesses.length !== 1 ? "es" : ""} found.
+        </p>
+        <div className="grid gap-6">
+          {businesses.map((business) => (
+            <div key={business.id} className="space-y-2">
+              <BusinessCard business={business} />
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setBusinessToDelete(business)}
+                  className="px-4 py-1.5 rounded-full bg-red-600 text-white text-xs font-medium hover:bg-red-700 cursor-pointer disabled:opacity-50"
+                  disabled={deleteMutation.isPending && businessToDelete?.id === business.id}
+                >
+                  {deleteMutation.isPending && businessToDelete?.id === business.id
+                    ? "Deleting..."
+                    : "Delete"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
+
+      <ConfirmModal
+        isOpen={!!businessToDelete}
+        onClose={() => setBusinessToDelete(null)}
+        onConfirm={handleConfirmDelete}
+        title="Delete business"
+        message={
+          businessToDelete
+            ? `Are you sure you want to delete "${businessToDelete.businessName}"? This will hide it from the list and user app.`
+            : ""
+        }
+        confirmLabel="Delete"
+        isLoading={deleteMutation.isPending}
+      />
+    </>
   );
 }

@@ -82,6 +82,15 @@ export default function LocalBusinessDetailPage() {
   const heroImage = business.images?.[0] || "";
   const otherImages = business.images?.slice(1) ?? [];
 
+  const primaryService = (() => {
+    const services = (business as { services?: string[] | string }).services;
+    const value = Array.isArray(services) ? services[0] : services;
+    if (typeof value !== "string") return "";
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+  })();
+
   return (
     <ProtectedLayout>
     <MainLayout>
@@ -136,7 +145,8 @@ export default function LocalBusinessDetailPage() {
                       {business.businessName}
                     </h1>
                     <p className="text-white/95 text-sm sm:text-base mt-1">
-                      {business.businessType} · {business.services.charAt(0).toUpperCase() + business.services.slice(1)}
+                      {business.businessType}
+                      {primaryService && <> · {primaryService}</>}
                     </p>
                   </div>
                 </div>

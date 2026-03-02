@@ -12,7 +12,7 @@ interface PendingPost {
   media?: Array<{ url: string; type: string }>;
   postType?: string;
   category?: { name: string };
-  author?: { name: string; email: string; avatarUrl?: string };
+  author?: { id: string; name: string; email: string; avatarUrl?: string };
   createdAt: string;
 }
 
@@ -97,7 +97,21 @@ export function UserGeneratedContentList() {
                 <h3 className="font-semibold text-gray-900 line-clamp-2">{item.title}</h3>
                 <p className="text-sm text-gray-600 mt-1 line-clamp-2">{item.content || "No description"}</p>
                 {item.author && (
-                  <p className="text-xs text-gray-500 mt-2">By {item.author.name}</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="relative h-8 w-8 shrink-0 rounded-full overflow-hidden bg-gray-200">
+                      {item.author.avatarUrl ? (
+                        <img src={item.author.avatarUrl} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="flex h-full w-full items-center justify-center text-xs font-medium text-gray-500">
+                          {(item.author.name || "?").charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-gray-700 truncate">{item.author.name}</p>
+                      <p className="text-[11px] text-gray-500 truncate">ID: {item.author.id}</p>
+                    </div>
+                  </div>
                 )}
               </div>
               <div className="flex sm:flex-col gap-2 sm:justify-center shrink-0">

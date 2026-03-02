@@ -13,6 +13,7 @@ interface Post {
   categoryId?: { name: string; slug?: string };
   media: { url: string; type: string }[];
   authorType?: 'user' | 'admin';
+  author?: { id: string; name: string; avatarUrl?: string };
 }
 
 function formatDate(d: string) {
@@ -106,6 +107,23 @@ export default function PublicPostDetailPage() {
                 <span className="text-gray-400">User post</span>
               )}
             </div>
+            {post.author && (
+              <div className="flex items-center gap-3 mb-6 p-3 rounded-lg bg-gray-50 border border-gray-100">
+                <span className="relative h-10 w-10 shrink-0 rounded-full overflow-hidden bg-gray-200">
+                  {post.author.avatarUrl ? (
+                    <img src={post.author.avatarUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-sm font-medium text-gray-500">
+                      {(post.author.name || '?').charAt(0).toUpperCase()}
+                    </span>
+                  )}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-900">Posted by {post.author.name}</p>
+                  <p className="text-xs text-gray-500">User ID: {post.author.id}</p>
+                </div>
+              </div>
+            )}
 
             {post.media?.length ? (
               <div className="mb-6 space-y-4">
