@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "65533934562",
+    "project_id": "zeebuddy-ff87f",
+    "storage_bucket": "zeebuddy-ff87f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:65533934562:android:6e4ccc19f97dc75018d7bb",
+        "android_client_info": {
+          "package_name": "com.zeebuddy.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "65533934562-baooot1923srosup9oomaijm8uf22tof.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.zeebuddy.app",
+            "certificate_hash": "56dfacebee34d393fcb1c00f8d3b33394bf5c284"
+          }
+        },
+        {
+          "client_id": "65533934562-pfv7t88tii6dv5q28968d86a08lb78j7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.zeebuddy.app",
+            "certificate_hash": "a63058f929097749a606d69d3279adaa1726b4c4"
+          }
+        },
+        {
+          "client_id": "65533934562-72oki3cgiodfpeh358vfots5vevvgd1n.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAMcS1cA4tMqqycu2C4gY7UhgRCeu4DT_k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "65533934562-72oki3cgiodfpeh358vfots5vevvgd1n.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

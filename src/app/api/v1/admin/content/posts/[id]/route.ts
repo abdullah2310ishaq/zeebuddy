@@ -156,7 +156,7 @@ export async function DELETE(
     await connectDB();
 
     const post = await Post.findOneAndUpdate(
-      { _id: id, authorType: 'admin', deletedAt: null },
+      { _id: id, deletedAt: null },
       { deletedAt: new Date() },
       { new: true }
     );

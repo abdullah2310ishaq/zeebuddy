@@ -38,6 +38,12 @@ export const MAIN_MENU_ITEMS: MenuItem[] = [
         href: '/user-generated',
     },
     {
+        id: 'reports',
+        label: 'Reports',
+        icon: 'content',
+        href: '/reports',
+    },
+    {
         id: 'push-notification',
         label: 'Push Notification',
         icon: 'notification',

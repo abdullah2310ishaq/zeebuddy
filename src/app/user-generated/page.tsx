@@ -9,6 +9,7 @@ import { MobileSidebar } from "@/components/layout/MobileSidebar";
 import { UserGeneratedHeader } from "@/components/features/UserGeneratedHeader";
 import { UserGeneratedMetrics } from "@/components/features/UserGeneratedMetrics";
 import { UserGeneratedContentList } from "@/components/features/UserGeneratedContentList";
+import { UserGeneratedAllPostsList } from "@/components/features/UserGeneratedAllPostsList";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 export default function UserGeneratedPage() {
@@ -33,6 +34,7 @@ export default function UserGeneratedPage() {
           <div className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-8">
             <UserGeneratedMetrics />
             <UserGeneratedContentList />
+            <UserGeneratedAllPostsList />
           </div>
         </div>
       </MainContent>
