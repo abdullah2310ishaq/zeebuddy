@@ -17,9 +17,13 @@ export async function GET(request: NextRequest) {
     const niche = searchParams.get('niche')?.trim();
 
     const now = new Date();
-    const query: { deletedAt: null; date: { $gte: Date }; niche?: string } = {
+    const query: Record<string, unknown> = {
       deletedAt: null,
       date: { $gte: now },
+      $or: [
+        { scheduledAt: null },
+        { scheduledAt: { $lte: now } },
+      ],
     };
     if (niche) query.niche = niche;
 

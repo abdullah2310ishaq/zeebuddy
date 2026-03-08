@@ -59,6 +59,7 @@ const PostSchema = new Schema<IPost>(
 );
 
 PostSchema.index({ status: 1 });
+PostSchema.index({ status: 1, scheduledAt: 1 }); // For cron: publish due scheduled posts
 PostSchema.index({ authorId: 1 });
 PostSchema.index({ categoryId: 1 });
 PostSchema.index({ createdAt: -1 });
