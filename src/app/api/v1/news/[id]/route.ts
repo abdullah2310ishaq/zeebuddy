@@ -1,12 +1,20 @@
 import { NextRequest } from 'next/server';
 import { connectDB } from '@/lib/db';
-import { Post } from '@/models';
+import { Post, Like } from '@/models';
 import { apiSuccess, apiError } from '@/lib/api-response';
+import { getAuthUser } from '@/lib/auth';
 import { Types } from 'mongoose';
+
+interface PopulatedAuthor {
+  _id: Types.ObjectId;
+  name: string;
+  avatarUrl?: string;
+}
 
 /**
  * GET /api/v1/news/:id
- * Single news post for user app
+ * Single news post for user app.
+ * When authenticated: adds userLiked. Always includes author (id, name, avatarUrl).
  */
 export async function GET(
   request: NextRequest,
@@ -19,6 +27,8 @@ export async function GET(
     }
 
     await connectDB();
+
+    const currentUser = await getAuthUser(request.headers.get('Authorization'));
 
     const post = await Post.findOne({
       _id: id,
@@ -33,14 +43,32 @@ export async function GET(
       return apiError('Post not found', 'NOT_FOUND', 404);
     }
 
-    type PopulatedAuthor = { _id: unknown; name: string; avatarUrl?: string };
     const authorDoc = (post as unknown as { authorId?: PopulatedAuthor }).authorId;
     const author =
-      post.authorType === 'user' && authorDoc
-        ? { id: String(authorDoc._id), name: authorDoc.name, avatarUrl: authorDoc.avatarUrl }
+      authorDoc && typeof authorDoc === 'object' && 'name' in authorDoc
+        ? {
+            id: String(authorDoc._id),
+            name: authorDoc.name,
+            avatarUrl: authorDoc.avatarUrl,
+          }
         : undefined;
 
-    return apiSuccess({ ...post, author });
+    let userLiked = false;
+    if (currentUser) {
+      const like = await Like.findOne({
+        targetType: 'post',
+        targetId: id,
+        userId: currentUser._id,
+      }).lean();
+      userLiked = !!like;
+    }
+
+    const { authorId: _omit, ...rest } = post as unknown as Record<string, unknown>;
+    return apiSuccess({
+      ...rest,
+      author,
+      userLiked,
+    });
   } catch (err) {
     console.error('Get news error:', err);
     return apiError('Failed to fetch news', 'SERVER_ERROR', 500);
