@@ -6,6 +6,7 @@ import { apiFetch } from "@/lib/api-client";
 
 interface DeliveryLog {
   index: number;
+  channel?: "fcm" | "apns";
   success: boolean;
   messageId?: string;
   errorCode?: string;
@@ -128,7 +129,10 @@ export function ComposeSection({ onPreviewChange }: ComposeSectionProps) {
                   <ul className="space-y-1.5 list-none">
                     {lastResult.deliveryLogs.map((log) => (
                       <li key={log.index} className="flex flex-wrap gap-x-2 gap-y-0.5">
-                        <span className="text-gray-700">Token #{log.index}:</span>
+                        <span className="text-gray-700">
+                          Token #{log.index}
+                          {log.channel ? ` (${log.channel === "fcm" ? "FCM" : "APNs"})` : ""}:
+                        </span>
                         {log.success ? (
                           <span className="text-green-700">OK</span>
                         ) : (
@@ -148,12 +152,23 @@ export function ComposeSection({ onPreviewChange }: ComposeSectionProps) {
                   {lastResult.deliveryLogs.some(
                     (l) =>
                       !l.success &&
+                      l.channel === "fcm" &&
                       (l.errorCode?.includes("mismatched-credential") || l.errorMessage?.toLowerCase().includes("senderid"))
                   ) && (
                     <p className="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-600">
                       <strong>SenderId mismatch?</strong> Even with the same Firebase project, this usually means the
                       stored FCM token is old (e.g. from a previous build). Have the user open the app and sign in again
                       so a new token is sent via <code className="bg-gray-200 px-1 rounded">POST /api/v1/user/fcm-token</code>.
+                    </p>
+                  )}
+                  {lastResult.deliveryLogs.some(
+                    (l) => !l.success && l.channel === "apns" && l.errorCode === "APNS_ERROR"
+                  ) && (
+                    <p className="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-600">
+                      <strong>APNs issue?</strong> Confirm server env <code className="bg-gray-200 px-1 rounded">APNS_*</code>{" "}
+                      (Team ID, Key ID, Bundle ID, <code className="bg-gray-200 px-1 rounded">APNS_P8_KEY</code>) and that
+                      the iOS app registers with <code className="bg-gray-200 px-1 rounded">platform: &quot;ios&quot;</code>{" "}
+                      and the correct environment (sandbox vs production).
                     </p>
                   )}
                 </div>

@@ -36,6 +36,8 @@ service-account.json
 service-account*
 firebase-service-account.json
 *-service-account*.json
+*.p8
+AuthKey_8D54V7787M.p8
 
 # vercel
 .vercel

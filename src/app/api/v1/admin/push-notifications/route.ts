@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { connectDB } from '@/lib/db';
 import { PushNotification, User } from '@/models';
 import { requireAdmin } from '@/lib/auth';
-import { sendFCMNotification } from '@/lib/firebase-admin';
+import { sendBroadcastPush } from '@/lib/push-delivery';
 import { isPostNotificationsEnabled } from '@/lib/app-settings';
 import { apiSuccess, apiError, apiUnauthorized } from '@/lib/api-response';
 
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/v1/admin/push-notifications
- * Send push notification via FCM
+ * Send push to Android (FCM) and iOS (APNs) using stored tokens.
  * Body: { title: string, body: string, targetAudience?: 'all' | 'segment' }
  */
 export async function POST(request: NextRequest) {
@@ -68,18 +68,14 @@ export async function POST(request: NextRequest) {
     }
 
     const users = await User.find({
-      fcmToken: { $exists: true, $ne: '' },
       deletedAt: null,
+      $or: [
+        { fcmToken: { $exists: true, $ne: '' } },
+        { pushTokens: { $elemMatch: { token: { $exists: true, $nin: [null, ''] } } } },
+      ],
     })
-      .select('fcmToken notificationSettings')
+      .select('fcmToken pushTokens notificationSettings')
       .lean();
-    const tokens = users
-      .filter((u) => {
-        const settings = u.notificationSettings;
-        return settings?.adminPush !== false;
-      })
-      .map((u) => u.fcmToken)
-      .filter((t): t is string => Boolean(t && String(t).trim()));
 
     const notification = await PushNotification.create({
       title,
@@ -89,15 +85,44 @@ export async function POST(request: NextRequest) {
       status: 'pending',
     });
 
-    let successCount = 0;
-    let failureCount = 0;
+    const data = {
+      type: 'admin_broadcast',
+      notificationId: String(notification._id),
+    };
 
-    if (tokens.length === 0) {
+    try {
+      const result = await sendBroadcastPush(users, title, notificationBody, data);
+
+      if (result.totalTargets === 0) {
+        await PushNotification.findByIdAndUpdate(notification._id, {
+          status: 'sent',
+          sentAt: new Date(),
+          updatedAt: new Date(),
+        });
+        return apiSuccess(
+          {
+            id: notification._id,
+            title,
+            body: notificationBody,
+            status: 'sent',
+            sentAt: new Date(),
+            successCount: 0,
+            failureCount: 0,
+            totalTokens: 0,
+            message:
+              'No devices to send to. Users must register tokens via POST /api/v1/user/fcm-token (Android: FCM; iOS: APNs device token with platform).',
+          },
+          'No push tokens registered. Enable push in the user app and ensure users have signed in.',
+          201
+        );
+      }
+
       await PushNotification.findByIdAndUpdate(notification._id, {
         status: 'sent',
         sentAt: new Date(),
         updatedAt: new Date(),
       });
+
       return apiSuccess(
         {
           id: notification._id,
@@ -105,80 +130,29 @@ export async function POST(request: NextRequest) {
           body: notificationBody,
           status: 'sent',
           sentAt: new Date(),
-          successCount: 0,
-          failureCount: 0,
-          totalTokens: 0,
-          message: 'No devices to send to. Users must register FCM tokens via the user app (POST /api/v1/user/fcm-token).',
+          successCount: result.successCount,
+          failureCount: result.failureCount,
+          totalTokens: result.totalTargets,
+          deliveryLogs: result.deliveryLogs,
         },
-        'No FCM tokens registered. Enable push in the user app and ensure users have signed in.',
+        result.successCount === 0 && result.failureCount > 0
+          ? 'Notification recorded but all deliveries failed. Tokens may be invalid, expired, or APNs/FCM misconfigured.'
+          : 'Notification sent',
         201
       );
-    }
-
-    const deliveryLogs: { index: number; success: boolean; messageId?: string; errorCode?: string; errorMessage?: string }[] = [];
-
-    try {
-      const result = await sendFCMNotification(tokens, title, notificationBody, {
-        notificationId: String(notification._id),
-      });
-      successCount = result.successCount;
-      failureCount = result.failureCount;
-      if (result.responses?.length) {
-        result.responses.forEach((r, i) => {
-          if (r.success) {
-            deliveryLogs.push({ index: i + 1, success: true, messageId: (r as { messageId?: string }).messageId });
-          } else if (r.error) {
-            const err = r.error as { code?: string; message?: string };
-            deliveryLogs.push({
-              index: i + 1,
-              success: false,
-              errorCode: err.code ?? 'unknown',
-              errorMessage: err.message ?? 'No message',
-            });
-            console.error(`[Push] FCM token[${i}] failed:`, err.code, err.message);
-          } else {
-            deliveryLogs.push({ index: i + 1, success: false, errorCode: 'unknown', errorMessage: 'No error details' });
-          }
-        });
-      }
-    } catch (fcmErr) {
-      console.error('FCM send error:', fcmErr);
+    } catch (sendErr) {
+      console.error('Push send error:', sendErr);
       await PushNotification.findByIdAndUpdate(notification._id, {
         status: 'sent',
         sentAt: new Date(),
         updatedAt: new Date(),
       });
       return apiError(
-        'Failed to send via FCM. Check FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY and that the user app has valid FCM tokens.',
+        'Failed to send push. Check FIREBASE_* for FCM and APNS_* for iOS (.p8, Team ID, Key ID, Bundle ID).',
         'SERVER_ERROR',
         500
       );
     }
-
-    await PushNotification.findByIdAndUpdate(notification._id, {
-      status: 'sent',
-      sentAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    return apiSuccess(
-      {
-        id: notification._id,
-        title,
-        body: notificationBody,
-        status: 'sent',
-        sentAt: new Date(),
-        successCount,
-        failureCount,
-        totalTokens: tokens.length,
-        /** Detailed per-token delivery logs for debugging (token index, success/fail, FCM error code/message). */
-        deliveryLogs,
-      },
-      successCount === 0 && failureCount > 0
-        ? 'Notification recorded but all deliveries failed. Tokens may be invalid or expired.'
-        : 'Notification sent',
-      201
-    );
   } catch (err) {
     console.error('Push notification send error:', err);
     return apiError('Failed to send notification', 'SERVER_ERROR', 500);

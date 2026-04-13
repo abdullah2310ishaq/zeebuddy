@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { connectDB } from '@/lib/db';
 import { Post, User } from '@/models';
 import { requireAdmin } from '@/lib/auth';
-import { sendFCMToUser } from '@/lib/firebase-admin';
+import { hasAnyRegisteredPushToken, sendPushToUser } from '@/lib/push-delivery';
 import { isPostNotificationsEnabled } from '@/lib/app-settings';
 import { apiSuccess, apiError, apiUnauthorized, apiNotFound } from '@/lib/api-response';
 import mongoose from 'mongoose';
@@ -33,18 +33,16 @@ export async function POST(
     if (!post) return apiNotFound('Post not found or already processed');
 
     const author = await User.findOne({ _id: post.authorId, deletedAt: null })
-      .select('fcmToken notificationSettings')
+      .select('fcmToken pushTokens notificationSettings')
       .lean();
     const globalEnabled = await isPostNotificationsEnabled();
-    if (globalEnabled && author?.fcmToken) {
-      const shouldNotify = author.notificationSettings?.postApprovalRejection !== false;
-      if (shouldNotify) {
-        await sendFCMToUser(
-          author.fcmToken,
-          'Your news was approved!',
-          `"${post.title ?? 'Your post'}" is now live.`,
-          { type: 'post_approved', postId: String(post._id) }
-        );
+    if (globalEnabled && hasAnyRegisteredPushToken(author)) {
+      const shouldNotify = author?.notificationSettings?.postApprovalRejection !== false;
+      if (shouldNotify && author) {
+        await sendPushToUser(author, 'Your news was approved!', `"${post.title ?? 'Your post'}" is now live.`, {
+          type: 'post_approved',
+          postId: String(post._id),
+        });
       }
     }
 

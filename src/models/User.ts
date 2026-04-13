@@ -6,6 +6,14 @@ export interface INotificationSettings {
   eventReminders?: boolean; // reminders for events I'm going to
 }
 
+/** Per-device registration; Android uses FCM token, iOS uses APNs device token. */
+export interface IUserPushToken {
+  platform: 'ios' | 'android';
+  token: string;
+  /** iOS only; omit or `production` for TestFlight / App Store. */
+  environment?: 'development' | 'production';
+}
+
 export interface IUser extends Document {
   email: string;
   phone?: string;
@@ -16,7 +24,10 @@ export interface IUser extends Document {
   firstName?: string;
   lastName?: string;
   avatarUrl?: string;
+  /** Legacy Android FCM field; still set when Android registers via fcm-token. */
   fcmToken?: string;
+  /** Multi-platform device tokens (iOS APNs + Android FCM). */
+  pushTokens?: IUserPushToken[];
   notificationSettings?: INotificationSettings;
   createdAt: Date;
   updatedAt: Date;
@@ -35,6 +46,13 @@ const UserSchema = new Schema<IUser>(
     lastName: { type: String },
     avatarUrl: { type: String },
     fcmToken: { type: String },
+    pushTokens: [
+      {
+        platform: { type: String, enum: ['ios', 'android'], required: true },
+        token: { type: String, required: true },
+        environment: { type: String, enum: ['development', 'production'], required: false },
+      },
+    ],
     notificationSettings: {
       postApprovalRejection: { type: Boolean, default: true },
       adminPush: { type: Boolean, default: true },
