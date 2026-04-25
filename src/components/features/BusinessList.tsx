@@ -16,6 +16,7 @@ interface Business {
   businessDescription: string;
   businessType: string;
   serviceAreas: string;
+  media?: Array<{ url: string; type: "image" | "video"; publicId?: string }>;
   images: string[];
   createdAt: string;
   updatedAt: string;
@@ -24,7 +25,10 @@ interface Business {
 const APP_GRADIENT = `linear-gradient(135deg, ${COLORS.GRADIENT_START} 0%, ${COLORS.GRADIENT_END} 100%)`;
 
 function BusinessCard({ business }: { business: Business }) {
-  const heroImage = business.images?.[0] || "";
+  const heroImage =
+    business.media?.find((m) => m.type === "image")?.url ||
+    business.images?.[0] ||
+    "";
   const servicesLabel = business.services.join(", ");
 
   return (

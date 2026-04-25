@@ -8,6 +8,19 @@ export interface IBusiness extends Document {
   businessDescription: string;
   businessType: string;
   serviceAreas: string;
+  /**
+   * Rich media list (images + videos). Backward-compatible with legacy `images`.
+   * Prefer this field for new clients.
+   */
+  media?: Array<{
+    url: string;
+    type: 'image' | 'video';
+    publicId?: string;
+  }>;
+  /**
+   * Legacy images-only list. Kept for older clients.
+   * Should be derived from `media` where possible.
+   */
   images: string[];
   createdAt: Date;
   updatedAt: Date;
@@ -32,6 +45,19 @@ const BusinessSchema = new Schema<IBusiness>(
     businessDescription: { type: String, default: '' },
     businessType: { type: String, required: true },
     serviceAreas: { type: String, default: '' },
+    media: {
+      type: [
+        new Schema(
+          {
+            url: { type: String, required: true },
+            type: { type: String, enum: ['image', 'video'], required: true },
+            publicId: { type: String, default: '' },
+          },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
     images: { type: [String], default: [] },
     deletedAt: { type: Date, default: null },
   },
@@ -42,4 +68,22 @@ BusinessSchema.index({ businessType: 1 });
 BusinessSchema.index({ services: 1 });
 
 export const Business: Model<IBusiness> =
-  mongoose.models.Business ?? mongoose.model<IBusiness>('Business', BusinessSchema);
+  (() => {
+    const existing = mongoose.models.Business as Model<IBusiness> | undefined;
+    if (existing) {
+      // In Next.js dev/HMR, Mongoose can keep an older schema in memory.
+      // If the cached model doesn't have the new `media` path, recreate it.
+      const hasMediaPath = typeof (existing as unknown as { schema?: unknown })?.schema === 'object'
+        ? !!(existing as unknown as { schema: { path?: (p: string) => unknown } }).schema.path?.('media')
+        : false;
+
+      if (!hasMediaPath) {
+        mongoose.deleteModel('Business');
+        return mongoose.model<IBusiness>('Business', BusinessSchema);
+      }
+
+      return existing;
+    }
+
+    return mongoose.model<IBusiness>('Business', BusinessSchema);
+  })();

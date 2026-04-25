@@ -5,6 +5,13 @@ import { connectDB } from '@/lib/db';
 import { Business } from '@/models';
 import { uploadToCloudinary } from '@/lib/cloudinary';
 
+type BusinessMediaType = 'image' | 'video';
+export interface BusinessMediaItem {
+  url: string;
+  type: BusinessMediaType;
+  publicId?: string;
+}
+
 export interface BusinessFormData {
   businessName: string;
   /** 1 to 3 services per business */
@@ -15,6 +22,7 @@ export interface BusinessFormData {
   serviceAreas?: string;
   images?: File[];
   existingImages?: string[];
+  media?: BusinessMediaItem[];
 }
 
 export interface SaveBusinessResult {
@@ -33,11 +41,68 @@ export interface GetBusinessesResult {
     businessDescription: string;
     businessType: string;
     serviceAreas: string;
+    media?: BusinessMediaItem[];
     images: string[];
     createdAt: Date;
     updatedAt: Date;
   }>;
   message?: string;
+}
+
+function uniqStrings(items: string[]): string[] {
+  return Array.from(new Set(items.map((s) => s.trim()).filter(Boolean)));
+}
+
+function getStringArrayFromForm(formData: FormData, key: string): string[] {
+  const rawValue = formData.get(key);
+  if (typeof rawValue !== 'string' || !rawValue.trim()) return [];
+
+  try {
+    const parsed: unknown = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      .map((item) => item.trim());
+  } catch {
+    return [];
+  }
+}
+
+function getMediaFromForm(formData: FormData): BusinessMediaItem[] {
+  const raw = formData.get('existingMedia');
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((m): m is BusinessMediaItem => {
+            if (!m || typeof m !== 'object') return false;
+            const rec = m as Record<string, unknown>;
+            const url = rec.url;
+            const type = rec.type;
+            if (typeof url !== 'string' || !url.trim()) return false;
+            if (type !== 'image' && type !== 'video') return false;
+            const publicId = rec.publicId;
+            return publicId === undefined || typeof publicId === 'string';
+          })
+          .map((m) => ({
+            url: m.url.trim(),
+            type: m.type,
+            ...(m.publicId ? { publicId: m.publicId } : {}),
+          }));
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Legacy fallback: treat existingImages as image media.
+  const legacyImages = getStringArrayFromForm(formData, 'existingImages');
+  return legacyImages.map((url) => ({ url, type: 'image' as const }));
+}
+
+function mediaToLegacyImages(media: BusinessMediaItem[]): string[] {
+  return uniqStrings(media.filter((m) => m.type === 'image').map((m) => m.url));
 }
 
 async function uploadFiles(files: File[]): Promise<string[]> {
@@ -82,10 +147,24 @@ export async function saveBusinessMongo(formData: FormData): Promise<SaveBusines
       if (entry instanceof File && entry.size > 0) imageFiles.push(entry);
     }
 
-    let imageUrls: string[] = [];
+    const existingMedia = getMediaFromForm(formData);
+    const existingImages = mediaToLegacyImages(existingMedia);
+
+    let imageUrls: string[] = [...existingImages];
     if (imageFiles.length > 0) {
-      imageUrls = await uploadFiles(imageFiles);
+      const uploaded = await uploadFiles(imageFiles);
+      imageUrls = uniqStrings([...imageUrls, ...uploaded]);
     }
+
+    const uploadedImageMedia: BusinessMediaItem[] = imageUrls
+      .filter((url) => !existingImages.includes(url))
+      .map((url) => ({ url, type: 'image' as const }));
+
+    const media: BusinessMediaItem[] = [
+      ...existingMedia.filter((m) => m.type !== 'image'),
+      ...existingMedia.filter((m) => m.type === 'image'),
+      ...uploadedImageMedia,
+    ];
 
     await connectDB();
     const business = await Business.create({
@@ -95,7 +174,8 @@ export async function saveBusinessMongo(formData: FormData): Promise<SaveBusines
       businessDescription,
       businessType,
       serviceAreas,
-      images: imageUrls,
+      media,
+      images: mediaToLegacyImages(media),
     });
 
     revalidatePath('/local-business');
@@ -127,6 +207,7 @@ export async function getBusinessesMongo(): Promise<GetBusinessesResult> {
         businessDescription: b.businessDescription,
         businessType: b.businessType,
         serviceAreas: b.serviceAreas,
+        media: Array.isArray((b as { media?: unknown }).media) ? (b as { media: BusinessMediaItem[] }).media : undefined,
         images: b.images,
         createdAt: b.createdAt,
         updatedAt: b.updatedAt,
@@ -153,8 +234,9 @@ export async function updateBusinessMongo(
     const businessType = formData.get('businessType') as string;
     const serviceAreas = (formData.get('serviceAreas') as string) || '';
 
-    const existingImagesStr = formData.get('existingImages') as string;
-    let imageUrls: string[] = existingImagesStr ? JSON.parse(existingImagesStr) : [];
+    const existingMedia = getMediaFromForm(formData);
+    const existingImages = mediaToLegacyImages(existingMedia);
+    let imageUrls: string[] = [...existingImages];
 
     const imageFiles: File[] = [];
     for (const entry of formData.getAll('images')) {
@@ -162,8 +244,18 @@ export async function updateBusinessMongo(
     }
     if (imageFiles.length > 0) {
       const newUrls = await uploadFiles(imageFiles);
-      imageUrls = [...imageUrls, ...newUrls];
+      imageUrls = uniqStrings([...imageUrls, ...newUrls]);
     }
+
+    const uploadedImageMedia: BusinessMediaItem[] = imageUrls
+      .filter((url) => !existingImages.includes(url))
+      .map((url) => ({ url, type: 'image' as const }));
+
+    const media: BusinessMediaItem[] = [
+      ...existingMedia.filter((m) => m.type !== 'image'),
+      ...existingMedia.filter((m) => m.type === 'image'),
+      ...uploadedImageMedia,
+    ];
 
     if (!businessName || !businessType) {
       return { success: false, message: 'Business name and business type are required' };
@@ -182,7 +274,8 @@ export async function updateBusinessMongo(
         businessDescription,
         businessType,
         serviceAreas,
-        images: imageUrls,
+        media,
+        images: mediaToLegacyImages(media),
         updatedAt: new Date(),
       },
       { new: true }
@@ -205,6 +298,9 @@ export async function updateBusinessMongo(
         businessDescription: business.businessDescription,
         businessType: business.businessType,
         serviceAreas: business.serviceAreas,
+        media: Array.isArray((business as { media?: unknown }).media)
+          ? ((business as { media: BusinessMediaItem[] }).media as BusinessMediaItem[])
+          : undefined,
         images: business.images,
         createdAt: business.createdAt,
         updatedAt: business.updatedAt,

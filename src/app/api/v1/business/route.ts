@@ -3,6 +3,36 @@ import { connectDB } from '@/lib/db';
 import { Business } from '@/models';
 import { apiSuccess, apiError } from '@/lib/api-response';
 
+type BusinessMediaType = 'image' | 'video';
+type BusinessMediaItem = { url: string; type: BusinessMediaType; publicId?: string };
+
+function toMedia(b: { media?: unknown; images?: unknown }): BusinessMediaItem[] {
+  const mediaRaw = (b as { media?: unknown }).media;
+  if (Array.isArray(mediaRaw)) {
+    const cleaned = mediaRaw
+      .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
+      .map((m) => ({
+        url: typeof m.url === 'string' ? m.url.trim() : '',
+        type: m.type === 'video' ? ('video' as const) : ('image' as const),
+        publicId: typeof m.publicId === 'string' && m.publicId.trim() ? m.publicId.trim() : undefined,
+      }))
+      .filter((m) => !!m.url);
+    if (cleaned.length > 0) return cleaned;
+  }
+
+  const imagesRaw = (b as { images?: unknown }).images;
+  if (Array.isArray(imagesRaw)) {
+    return imagesRaw
+      .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+      .map((u) => ({ url: u.trim(), type: 'image' as const }));
+  }
+  return [];
+}
+
+function mediaToLegacyImages(media: BusinessMediaItem[]): string[] {
+  return Array.from(new Set(media.filter((m) => m.type === 'image').map((m) => m.url)));
+}
+
 /**
  * GET /api/v1/business
  * Returns list of all businesses (MongoDB)
@@ -31,7 +61,8 @@ export async function GET(request: NextRequest) {
         businessDescription: b.businessDescription,
         businessType: b.businessType,
         serviceAreas: b.serviceAreas,
-        images: b.images,
+        media: toMedia(b),
+        images: mediaToLegacyImages(toMedia(b)),
         createdAt: b.createdAt,
         updatedAt: b.updatedAt,
       }))
@@ -70,6 +101,7 @@ export async function POST(request: NextRequest) {
       businessType,
       serviceAreas,
       images = [],
+      media,
     } = body;
 
     if (!businessName || !businessType) {
@@ -84,6 +116,23 @@ export async function POST(request: NextRequest) {
       return apiError('Maximum 3 services allowed per business', 'VALIDATION_ERROR', 400);
     }
 
+    const parsedMedia: BusinessMediaItem[] = Array.isArray(media)
+      ? media
+          .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
+          .map((m) => ({
+            url: typeof m.url === 'string' ? m.url.trim() : '',
+            type: m.type === 'video' ? ('video' as const) : ('image' as const),
+            publicId: typeof m.publicId === 'string' && m.publicId.trim() ? m.publicId.trim() : undefined,
+          }))
+          .filter((m) => !!m.url)
+      : [];
+
+    const legacyImages: string[] = Array.isArray(images)
+      ? images.filter((u): u is string => typeof u === 'string' && u.trim().length > 0).map((u) => u.trim())
+      : [];
+
+    const mediaFinal = parsedMedia.length > 0 ? parsedMedia : legacyImages.map((u) => ({ url: u, type: 'image' as const }));
+
     const business = await Business.create({
       businessName,
       services,
@@ -91,7 +140,8 @@ export async function POST(request: NextRequest) {
       businessDescription: businessDescription || '',
       businessType,
       serviceAreas: serviceAreas || '',
-      images: Array.isArray(images) ? images : [],
+      media: mediaFinal,
+      images: mediaToLegacyImages(mediaFinal),
     });
 
     return apiSuccess(
@@ -103,7 +153,8 @@ export async function POST(request: NextRequest) {
         businessDescription: business.businessDescription,
         businessType: business.businessType,
         serviceAreas: business.serviceAreas,
-        images: business.images,
+        media: mediaFinal,
+        images: mediaToLegacyImages(mediaFinal),
         createdAt: business.createdAt,
         updatedAt: business.updatedAt,
       },

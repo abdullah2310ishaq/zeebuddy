@@ -15,6 +15,32 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 const APP_GRADIENT = `linear-gradient(135deg, ${COLORS.GRADIENT_START} 0%, ${COLORS.GRADIENT_END} 100%)`;
 
+type BusinessMediaType = "image" | "video";
+type BusinessMediaItem = { url: string; type: BusinessMediaType; publicId?: string };
+
+function toMedia(business: unknown): BusinessMediaItem[] {
+  if (!business || typeof business !== "object") return [];
+  const rec = business as Record<string, unknown>;
+  const mediaRaw = rec.media;
+  if (Array.isArray(mediaRaw)) {
+    return mediaRaw
+      .filter((m): m is Record<string, unknown> => !!m && typeof m === "object")
+      .map((m) => ({
+        url: typeof m.url === "string" ? m.url.trim() : "",
+        type: m.type === "video" ? ("video" as const) : ("image" as const),
+        publicId: typeof m.publicId === "string" && m.publicId.trim() ? m.publicId.trim() : undefined,
+      }))
+      .filter((m) => !!m.url);
+  }
+  const imagesRaw = rec.images;
+  if (Array.isArray(imagesRaw)) {
+    return imagesRaw
+      .filter((u): u is string => typeof u === "string" && u.trim().length > 0)
+      .map((u) => ({ url: u.trim(), type: "image" as const }));
+  }
+  return [];
+}
+
 export default function LocalBusinessDetailPage() {
   const params = useParams();
   const id = typeof params?.id === "string" ? params.id : "";
@@ -79,8 +105,12 @@ export default function LocalBusinessDetailPage() {
     );
   }
 
-  const heroImage = business.images?.[0] || "";
-  const otherImages = business.images?.slice(1) ?? [];
+  const media = toMedia(business);
+  const heroImage = media.find((m) => m.type === "image")?.url || "";
+  const heroVideo = !heroImage ? media.find((m) => m.type === "video")?.url || "" : "";
+  const heroUrl = heroImage || heroVideo;
+  const galleryMedia =
+    media.length <= 1 ? media : media.filter((m) => m.url !== heroUrl);
 
   const primaryService = (() => {
     const services = (business as { services?: string[] | string }).services;
@@ -131,6 +161,13 @@ export default function LocalBusinessDetailPage() {
                       alt=""
                       className="absolute inset-0 w-full h-full object-cover"
                     />
+                  ) : heroVideo ? (
+                    <video
+                      src={heroVideo}
+                      className="absolute inset-0 w-full h-full object-cover"
+                      controls
+                      playsInline
+                    />
                   ) : (
                     <div
                       className="absolute inset-0 flex items-center justify-center text-6xl text-white/80"
@@ -163,20 +200,32 @@ export default function LocalBusinessDetailPage() {
                   </section>
 
                   {/* Gallery */}
-                  {otherImages.length > 0 && (
+                  {galleryMedia.length > 0 && (
                     <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
                       <h2 className="text-lg font-bold text-gray-900 mb-4">Gallery</h2>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                        {otherImages.map((url: string, i: number) => (
+                        {galleryMedia.map((item: BusinessMediaItem, i: number) => (
                           <div
                             key={i}
-                            className="aspect-square rounded-xl overflow-hidden bg-gray-100"
+                            className={item.type === "video"
+                              ? "rounded-xl overflow-hidden bg-black aspect-video"
+                              : "aspect-square rounded-xl overflow-hidden bg-gray-100"}
                           >
-                            <img
-                              src={url}
-                              alt=""
-                              className="w-full h-full object-cover"
-                            />
+                            {item.type === "video" ? (
+                              <video
+                                src={item.url}
+                                className="w-full h-full object-contain"
+                                controls
+                                playsInline
+                                preload="metadata"
+                              />
+                            ) : (
+                              <img
+                                src={item.url}
+                                alt=""
+                                className="w-full h-full object-cover"
+                              />
+                            )}
                           </div>
                         ))}
                       </div>

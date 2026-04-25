@@ -1,10 +1,13 @@
 "use client";
 
 import React, { useState, useRef, ChangeEvent, FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
 import { saveBusinessMongo, updateBusinessMongo } from "@/actions/business-mongo";
+import { apiUpload } from "@/lib/api-client";
+import type { BusinessMediaItem } from "@/actions/business-mongo";
 
 interface Business {
   id: string;
@@ -15,14 +18,18 @@ interface Business {
   businessType: string;
   serviceAreas: string;
   images: string[];
+  media?: BusinessMediaItem[];
   createdAt: Date;
   updatedAt: Date;
 }
 import { useQueryClient } from "@tanstack/react-query";
 
-interface ImagePreview {
+type UploadKind = "image" | "video";
+
+interface MediaPreview {
   url: string;
   file: File;
+  kind: UploadKind;
 }
 
 interface BusinessFormProps {
@@ -30,7 +37,13 @@ interface BusinessFormProps {
   onSuccess?: () => void;
 }
 
+interface UploadResponse {
+  url: string;
+  publicId: string;
+}
+
 export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const isEditing = !!business;
   const [selectedBusinessType, setSelectedBusinessType] = useState<string>(business?.businessType || "");
@@ -40,8 +53,12 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
     if (typeof s === 'string' && s.trim()) return [s.trim()];
     return [];
   });
-  const [existingImages, setExistingImages] = useState<string[]>(business?.images || []);
-  const [imagePreviews, setImagePreviews] = useState<ImagePreview[]>([]);
+  const [existingMedia, setExistingMedia] = useState<BusinessMediaItem[]>(() => {
+    if (business?.media && Array.isArray(business.media) && business.media.length > 0) return business.media;
+    const legacy = business?.images ?? [];
+    return legacy.map((url) => ({ url, type: "image" as const }));
+  });
+  const [mediaPreviews, setMediaPreviews] = useState<MediaPreview[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   
@@ -112,14 +129,15 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
     setSelectedServices((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleMediaUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files) {
-      const newPreviews: ImagePreview[] = Array.from(files).map((file) => ({
+      const newPreviews: MediaPreview[] = Array.from(files).map((file) => ({
         url: URL.createObjectURL(file),
-        file: file,
+        file,
+        kind: file.type.startsWith("video/") ? "video" : "image",
       }));
-      setImagePreviews((prev) => [...prev, ...newPreviews]);
+      setMediaPreviews((prev) => [...prev, ...newPreviews]);
     }
     // Reset input to allow selecting the same file again
     if (fileInputRef.current) {
@@ -127,8 +145,8 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
     }
   };
 
-  const handleRemoveImage = (index: number) => {
-    setImagePreviews((prev) => {
+  const handleRemoveMediaPreview = (index: number) => {
+    setMediaPreviews((prev) => {
       const newPreviews = [...prev];
       URL.revokeObjectURL(newPreviews[index].url);
       newPreviews.splice(index, 1);
@@ -140,8 +158,8 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
     setSelectedBusinessType(type);
   };
 
-  const handleRemoveExistingImage = (index: number) => {
-    setExistingImages((prev) => prev.filter((_, i) => i !== index));
+  const handleRemoveExistingMedia = (index: number) => {
+    setExistingMedia((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -153,26 +171,58 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
     setIsSubmitting(true);
     setSubmitMessage(null);
 
-    const formData = new FormData(e.currentTarget);
-    
-    // Add existing images to form data
-    formData.append('existingImages', JSON.stringify(existingImages));
-    
-    // Add new images to form data
-    imagePreviews.forEach((preview) => {
-      formData.append('images', preview.file);
-    });
-
     try {
+      const formEl = formRef.current;
+      if (!formEl) {
+        throw new Error("Form is not ready. Please try again.");
+      }
+
+      const uploadedMedia = await Promise.all(
+        mediaPreviews.map(async (preview): Promise<BusinessMediaItem> => {
+          const uploadFormData = new FormData();
+          uploadFormData.append("file", preview.file);
+          uploadFormData.append("folder", "businesses");
+          uploadFormData.append("type", preview.kind);
+
+          const res = await apiUpload<UploadResponse>("/upload", uploadFormData);
+          if (!res.success || !res.data?.url) {
+            throw new Error(res.error || `Failed to upload ${preview.file.name}`);
+          }
+
+          return {
+            url: res.data.url,
+            type: preview.kind,
+            publicId: res.data.publicId,
+          };
+        })
+      );
+
+      const merged = [...existingMedia, ...uploadedMedia];
+      const deduped = merged.filter((item, idx) => {
+        const key = `${item.type}:${item.url}`;
+        return merged.findIndex((x) => `${x.type}:${x.url}` === key) === idx;
+      });
+
+      const formData = new FormData(formEl);
+      formData.set("existingMedia", JSON.stringify(deduped));
+
       let result;
       if (isEditing && business) {
         result = await updateBusinessMongo(business.id, formData);
       } else {
         result = await saveBusinessMongo(formData);
       }
+
+      const createdBusinessId =
+        !isEditing && "businessId" in result && typeof result.businessId === "string"
+          ? result.businessId
+          : null;
       
       if (result.success) {
-            setSubmitMessage({ type: 'success', text: result.message });
+        mediaPreviews.forEach((preview) => URL.revokeObjectURL(preview.url));
+        setMediaPreviews([]);
+        setExistingMedia(deduped);
+        setSubmitMessage({ type: 'success', text: result.message });
         queryClient.invalidateQueries({ queryKey: ["businesses"] });
         
         if (onSuccess) {
@@ -183,12 +233,14 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
             formRef.current?.reset();
             setSelectedBusinessType('');
             setSelectedServices([]);
-            setImagePreviews([]);
-            setExistingImages([]);
-            // Clear image previews URLs
-            imagePreviews.forEach((preview) => {
-              URL.revokeObjectURL(preview.url);
-            });
+            setExistingMedia([]);
+
+            if (createdBusinessId) {
+              // Let the success banner paint before navigating.
+              setTimeout(() => {
+                router.push(`/local-business/${createdBusinessId}`);
+              }, 250);
+            }
           }
         }
       } else {
@@ -385,35 +437,43 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
           {/* Add Images */}
           <div>
             <label className="block text-sm font-medium text-gray-900 mb-2">
-              Add Images
+              Add Media (Images / Videos)
             </label>
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,video/*"
               multiple
-              onChange={handleImageUpload}
+              onChange={handleMediaUpload}
               className="hidden"
             />
 
-            {/* Existing Images */}
-            {existingImages.length > 0 && (
+            {/* Existing Media */}
+            {existingMedia.length > 0 && (
               <div className="mb-4">
-                <p className="text-sm text-gray-600 mb-2">Existing Images:</p>
+                <p className="text-sm text-gray-600 mb-2">Existing Media:</p>
                 <div className="grid grid-cols-2 gap-4">
-                  {existingImages.map((imageUrl, index) => (
+                  {existingMedia.map((item, index) => (
                     <div
                       key={index}
                       className="relative group aspect-square rounded-xl overflow-hidden border-2 border-gray-300"
                     >
-                      <img
-                        src={imageUrl}
-                        alt={`Existing ${index + 1}`}
-                        className="w-full h-full object-cover"
-                      />
+                      {item.type === "video" ? (
+                        <video
+                          src={item.url}
+                          className="w-full h-full object-cover"
+                          controls
+                        />
+                      ) : (
+                        <img
+                          src={item.url}
+                          alt={`Existing ${index + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      )}
                       <button
                         type="button"
-                        onClick={() => handleRemoveExistingImage(index)}
+                        onClick={() => handleRemoveExistingMedia(index)}
                         className="absolute top-2 right-2 w-8 h-8 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                       >
                         <svg
@@ -436,8 +496,8 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
               </div>
             )}
 
-            {/* Image Upload Area */}
-            {imagePreviews.length === 0 && existingImages.length === 0 ? (
+            {/* Upload Area */}
+            {mediaPreviews.length === 0 && existingMedia.length === 0 ? (
               <div
                 onClick={() => fileInputRef.current?.click()}
                 className="w-full h-48 border-2 border-dashed border-red-600 rounded-xl flex flex-col items-center justify-center bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer"
@@ -457,26 +517,34 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
                     />
                   </svg>
                 </div>
-                <p className="text-sm font-medium text-gray-700">Add New Image</p>
+                <p className="text-sm font-medium text-gray-700">Add New Media</p>
               </div>
             ) : (
               <div className="space-y-4">
-                {/* Image Grid */}
+                {/* Media Grid */}
                 <div className="grid grid-cols-2 gap-4">
-                  {imagePreviews.map((preview, index) => (
+                  {mediaPreviews.map((preview, index) => (
                     <div
                       key={index}
                       className="relative group aspect-square rounded-xl overflow-hidden border-2 border-red-600"
                     >
-                      <img
-                        src={preview.url}
-                        alt={`Uploaded ${index + 1}`}
-                        className="w-full h-full object-cover"
-                      />
+                      {preview.kind === "video" ? (
+                        <video
+                          src={preview.url}
+                          className="w-full h-full object-cover"
+                          controls
+                        />
+                      ) : (
+                        <img
+                          src={preview.url}
+                          alt={`Uploaded ${index + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      )}
                       {/* Remove Button */}
                       <button
                         type="button"
-                        onClick={() => handleRemoveImage(index)}
+                        onClick={() => handleRemoveMediaPreview(index)}
                         className="absolute top-2 right-2 w-8 h-8 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                       >
                         <svg
@@ -519,7 +587,7 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
                     </svg>
                   </div>
                   <span className="text-sm font-medium text-gray-700">
-                    Add More Images
+                    Add More Media
                   </span>
                 </button>
               </div>
