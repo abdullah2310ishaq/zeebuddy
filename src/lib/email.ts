@@ -64,11 +64,11 @@ function buildOtpEmailHtml(otp: string, purpose: 'verification' | 'reset'): stri
   const titleNl = isReset ? 'Reset je wachtwoord' : 'Je verificatiecode';
 
   const introEn = isReset
-    ? 'Use the code below to reset your ZeeBuddy password.'
-    : 'Use the code below to verify your ZeeBuddy account.';
+    ? 'Use the code below to reset your Z Buddy password.'
+    : 'Use the code below to verify your Z Buddy account.';
   const introNl = isReset
-    ? 'Gebruik de onderstaande code om je ZeeBuddy-wachtwoord te resetten.'
-    : 'Gebruik de onderstaande code om je ZeeBuddy-account te verifiëren.';
+    ? 'Gebruik de onderstaande code om je Z Buddy-wachtwoord te resetten.'
+    : 'Gebruik de onderstaande code om je Z Buddy-account te verifiëren.';
 
   const expiryEn = 'This code expires in 10 minutes. Do not share it with anyone.';
   const expiryNl = 'Deze code verloopt over 10 minuten. Deel deze niet met anderen.';
@@ -133,8 +133,8 @@ function buildOtpEmailHtml(otp: string, purpose: 'verification' | 'reset'): stri
 export async function sendOtpEmail(to: string, otp: string, purpose = 'verification') {
   const subject =
     purpose === 'reset'
-      ? 'Reset your ZeeBuddy password'
-      : 'Your ZeeBuddy verification code';
+      ? 'Reset your Z Buddy password'
+      : 'Your Z Buddy verification code';
   const html = buildOtpEmailHtml(otp, purpose as 'verification' | 'reset');
   return sendEmail({ to, subject, html, text: `Your code is: ${otp}` });
 }
