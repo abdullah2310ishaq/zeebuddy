@@ -61,7 +61,7 @@ export async function sendEmail({
     FALLBACK_SMTP_USER;
 
   return transporter.sendMail({
-    from: `"ZeeBuddy" <${from}>`,
+    from: `"Z Buddy" <${from}>`,
     to: Array.isArray(to) ? to.join(', ') : to,
     subject,
     text: text ?? '',
@@ -72,10 +72,10 @@ export async function sendEmail({
 
 /** Brand colors matching the web app theme */
 const BRAND = {
-  primary: '#C21C15',
-  secondary: '#4C50D5',
-  gray: '#6B7280',
-  grayLight: '#9CA3AF',
+  primary: '#000000',
+  secondary: '#121212',
+  gray: '#A0A0A0',
+  grayLight: '#666666',
   white: '#FFFFFF',
 } as const;
 
@@ -110,28 +110,26 @@ function buildOtpEmailHtml(
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ZeeBuddy OTP</title>
+<title>Z Buddy OTP</title>
 </head>
 
-<body style="margin:0;padding:0;background:#F3F4F6;font-family:Segoe UI,Tahoma,Geneva,Verdana,sans-serif;">
+<body style="margin:0;padding:0;background:#0A0A0A;font-family:Segoe UI,Tahoma,Geneva,Verdana,sans-serif;">
 
 <table width="100%" cellpadding="0" cellspacing="0">
 <tr>
 <td align="center" style="padding:40px 20px;">
 
 <table width="100%" cellpadding="0" cellspacing="0"
-style="max-width:480px;background:#FFFFFF;border-radius:16px;overflow:hidden;">
+style="max-width:480px;background:#121212;border-radius:16px;overflow:hidden;border:1px solid #222222;">
 
 <tr>
-<td
-style="background:linear-gradient(135deg, ${BRAND.primary} 0%, ${BRAND.secondary} 100%);
-padding:32px 40px;text-align:center;">
+<td style="background:#000000;padding:32px 40px;text-align:center;border-bottom:1px solid #222222;">
 
-<h1 style="margin:0;color:#FFFFFF;font-size:28px;">
-ZeeBuddy
+<h1 style="margin:0;color:#FFFFFF;font-size:28px;font-weight:800;letter-spacing:1px;">
+Z Buddy
 </h1>
 
-<p style="margin:8px 0 0;color:#FFFFFF;font-size:14px;">
+<p style="margin:8px 0 0;color:${BRAND.gray};font-size:14px;">
 ${titleEn} · ${titleNl}
 </p>
 
@@ -141,30 +139,26 @@ ${titleEn} · ${titleNl}
 <tr>
 <td style="padding:40px;">
 
-<p style="font-size:16px;color:#374151;">
+<p style="font-size:16px;color:#FFFFFF;margin-top:0;">
 ${introEn}
 </p>
 
-<p style="font-size:14px;color:${BRAND.gray};">
+<p style="font-size:14px;color:${BRAND.gray};margin-bottom:0;">
 ${introNl}
 </p>
 
 <div
-style="margin-top:24px;padding:24px;border-radius:12px;
-background:linear-gradient(
-135deg,
-rgba(194,28,21,0.08) 0%,
-rgba(75,80,213,0.08) 100%
-);
+style="margin-top:32px;padding:24px;border-radius:12px;
+background:#1F1F1F;
 text-align:center;
-border:1px solid rgba(194,28,21,0.2);">
+border:1px solid #333333;">
 
 <p
 style="margin:0;
 font-size:32px;
 font-weight:700;
 letter-spacing:8px;
-color:${BRAND.primary};
+color:#FFFFFF;
 font-family:Courier New, monospace;">
 
 ${otp}
@@ -172,11 +166,11 @@ ${otp}
 </p>
 </div>
 
-<p style="margin-top:24px;font-size:13px;color:${BRAND.gray};">
+<p style="margin-top:32px;font-size:13px;color:${BRAND.gray};">
 This code expires in 10 minutes. Do not share it with anyone.
 </p>
 
-<p style="font-size:12px;color:${BRAND.grayLight};">
+<p style="font-size:12px;color:${BRAND.grayLight};margin-bottom:0;">
 Deze code verloopt over 10 minuten. Deel deze niet met anderen.
 </p>
 
@@ -185,12 +179,12 @@ Deze code verloopt over 10 minuten. Deel deze niet met anderen.
 
 <tr>
 <td
-style="padding:24px 40px;background:#F9FAFB;border-top:1px solid #E5E7EB;">
+style="padding:24px 40px;background:#000000;border-top:1px solid #222222;">
 
 <p
 style="margin:0;font-size:11px;color:${BRAND.grayLight};text-align:center;">
 
-© ZeeBuddy · Your local community app
+© Z Buddy · Your local community app
 
 </p>
 
@@ -215,8 +209,8 @@ export async function sendOtpEmail(
 ) {
   const subject =
     purpose === 'reset'
-      ? 'Reset your ZeeBuddy password'
-      : 'Your ZeeBuddy verification code';
+      ? 'Reset your Z Buddy password'
+      : 'Your Z Buddy verification code';
 
   const html = buildOtpEmailHtml(otp, purpose);
 
