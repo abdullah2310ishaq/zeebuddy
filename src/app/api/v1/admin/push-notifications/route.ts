@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { connectDB } from '@/lib/db';
-import { PushNotification, User } from '@/models';
+import { DevicePushToken, PushNotification, User } from '@/models';
 import { requireAdmin } from '@/lib/auth';
 import { sendBroadcastPush } from '@/lib/push-delivery';
 import { isPostNotificationsEnabled } from '@/lib/app-settings';
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/v1/admin/push-notifications
  * Send push to Android (FCM) and iOS (APNs) using stored tokens.
- * Body: { title: string, body: string, targetAudience?: 'all' | 'segment' }
+ * Body: { title: string, body: string, targetAudience?: 'all' | 'segment', includeGuests?: boolean }
  */
 export async function POST(request: NextRequest) {
   try {
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
     await connectDB();
 
     const body = await request.json();
-    const { title, body: notificationBody, targetAudience = 'all' } = body;
+    const { title, body: notificationBody, targetAudience = 'all', includeGuests = true } = body;
 
     if (!title || !notificationBody) {
       return apiError('title and body are required', 'VALIDATION_ERROR', 400);
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
       return apiError('Post notifications are disabled. Enable them in Dashboard settings.', 'NOTIFICATIONS_DISABLED', 400);
     }
 
-    const users = await User.find({
+    const usersWithAccounts = await User.find({
       deletedAt: null,
       $or: [
         { fcmToken: { $exists: true, $ne: '' } },
@@ -76,6 +76,41 @@ export async function POST(request: NextRequest) {
     })
       .select('fcmToken pushTokens notificationSettings')
       .lean();
+
+    const guestDeviceTokens = includeGuests
+      ? await DevicePushToken.find({
+          isActive: true,
+          appMode: "guest",
+          token: { $exists: true, $nin: ["", null] },
+        })
+          .select("platform token environment")
+          .lean()
+      : [];
+
+    const guestAsPushTargets = guestDeviceTokens.map((tokenDoc) => {
+      if (tokenDoc.platform === "android") {
+        return {
+          fcmToken: tokenDoc.token,
+          pushTokens: [{ platform: "android" as const, token: tokenDoc.token }],
+          notificationSettings: { adminPush: true },
+        };
+      }
+      return {
+        pushTokens: [
+          {
+            platform: "ios" as const,
+            token: tokenDoc.token,
+            environment:
+              tokenDoc.environment === "development"
+                ? ("development" as const)
+                : ("production" as const),
+          },
+        ],
+        notificationSettings: { adminPush: true },
+      };
+    });
+
+    const users = [...usersWithAccounts, ...guestAsPushTargets];
 
     const notification = await PushNotification.create({
       title,
@@ -110,7 +145,7 @@ export async function POST(request: NextRequest) {
             failureCount: 0,
             totalTokens: 0,
             message:
-              'No devices to send to. Users must register tokens via POST /api/v1/user/fcm-token (Android: FCM; iOS: APNs device token with platform).',
+              'No devices to send to. Register user tokens via POST /api/v1/user/fcm-token or guest tokens via POST /api/v1/push/device-token.',
           },
           'No push tokens registered. Enable push in the user app and ensure users have signed in.',
           201

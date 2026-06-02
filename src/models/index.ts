@@ -11,3 +11,4 @@ export { Business } from './Business';
 export { PushNotification } from './PushNotification';
 export { Report } from './Report';
 export { AppSettings, POST_NOTIFICATIONS_KEY } from './AppSettings';
+export { DevicePushToken } from "./DevicePushToken";
