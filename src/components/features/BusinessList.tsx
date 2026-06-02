@@ -189,6 +189,12 @@ export function BusinessList() {
             <div key={business.id} className="space-y-2">
               <BusinessCard business={business} />
               <div className="flex justify-end">
+                <Link
+                  href={`/local-business/${business.id}/edit`}
+                  className="px-4 py-1.5 rounded-full bg-gray-900 text-white text-xs font-medium hover:bg-black cursor-pointer mr-2"
+                >
+                  Edit
+                </Link>
                 <button
                   type="button"
                   onClick={() => setBusinessToDelete(business)}

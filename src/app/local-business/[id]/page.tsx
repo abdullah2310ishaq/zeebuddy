@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ProtectedLayout } from "@/components/ProtectedLayout";
 import { MainLayout } from "@/components/layout/MainLayout";
@@ -56,6 +56,18 @@ export default function LocalBusinessDetailPage() {
   });
   const isMobile = useMediaQuery("(max-width: 1024px)");
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [activeGalleryItem, setActiveGalleryItem] = useState<BusinessMediaItem | null>(null);
+
+  useEffect(() => {
+    if (!activeGalleryItem) return;
+
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setActiveGalleryItem(null);
+    };
+
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [activeGalleryItem]);
 
   if (isLoading) {
     return (
@@ -205,17 +217,19 @@ export default function LocalBusinessDetailPage() {
                       <h2 className="text-lg font-bold text-gray-900 mb-4">Gallery</h2>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         {galleryMedia.map((item: BusinessMediaItem, i: number) => (
-                          <div
+                          <button
                             key={i}
+                            type="button"
+                            onClick={() => setActiveGalleryItem(item)}
                             className={item.type === "video"
-                              ? "rounded-xl overflow-hidden bg-black aspect-video"
-                              : "aspect-square rounded-xl overflow-hidden bg-gray-100"}
+                              ? "rounded-xl overflow-hidden bg-black aspect-video cursor-pointer"
+                              : "aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer"}
                           >
                             {item.type === "video" ? (
                               <video
                                 src={item.url}
                                 className="w-full h-full object-contain"
-                                controls
+                                muted
                                 playsInline
                                 preload="metadata"
                               />
@@ -226,7 +240,7 @@ export default function LocalBusinessDetailPage() {
                                 className="w-full h-full object-cover"
                               />
                             )}
-                          </div>
+                          </button>
                         ))}
                       </div>
                     </section>
@@ -273,6 +287,13 @@ export default function LocalBusinessDetailPage() {
                   </section>
 
                   <Link
+                    href={`/local-business/${id}/edit`}
+                    className="block w-full text-center py-3 px-4 rounded-full font-semibold text-gray-900 border border-gray-300 bg-white hover:bg-gray-50 transition-colors cursor-pointer mb-3"
+                  >
+                    Edit Business
+                  </Link>
+
+                  <Link
                     href="/local-business"
                     className="block w-full text-center py-3 px-4 rounded-full font-semibold text-white transition-colors cursor-pointer"
                     style={{ background: APP_GRADIENT }}
@@ -286,6 +307,45 @@ export default function LocalBusinessDetailPage() {
         </div>
       </MainContent>
     </MainLayout>
+
+    {activeGalleryItem && (
+      <div
+        className="fixed inset-0 z-[100] bg-black/80 p-4 sm:p-8 flex items-center justify-center"
+        onClick={() => setActiveGalleryItem(null)}
+      >
+        <div
+          className="relative max-w-5xl w-full max-h-[90vh] rounded-2xl overflow-hidden bg-black"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={() => setActiveGalleryItem(null)}
+            className="absolute top-3 right-3 z-10 h-10 w-10 rounded-full bg-white/90 hover:bg-white text-gray-900 flex items-center justify-center"
+            aria-label="Close preview"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+
+          {activeGalleryItem.type === "video" ? (
+            <video
+              src={activeGalleryItem.url}
+              className="w-full max-h-[90vh] object-contain"
+              controls
+              autoPlay
+              playsInline
+            />
+          ) : (
+            <img
+              src={activeGalleryItem.url}
+              alt="Gallery preview"
+              className="w-full max-h-[90vh] object-contain"
+            />
+          )}
+        </div>
+      </div>
+    )}
     </ProtectedLayout>
   );
 }

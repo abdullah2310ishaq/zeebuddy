@@ -1,45 +1,74 @@
-import { NextRequest } from 'next/server';
-import { connectDB } from '@/lib/db';
-import { Business } from '@/models';
-import { apiSuccess, apiError, apiNotFound } from '@/lib/api-response';
-import mongoose from 'mongoose';
+import { NextRequest } from "next/server";
+import mongoose from "mongoose";
+import { connectDB } from "@/lib/db";
+import { Business } from "@/models";
+import { requireAdmin } from "@/lib/auth";
+import { apiSuccess, apiError, apiNotFound, apiUnauthorized } from "@/lib/api-response";
+import {
+  mediaToLegacyImages,
+  mergeServiceMutations,
+  parseUpdateBusinessPayload,
+} from "@/lib/validation/business";
+import type { BusinessEntity, BusinessMediaItem, UpdateBusinessRequest } from "@/types/business";
+import type { ValidationResult } from "@/lib/validation/business";
 
-type BusinessMediaType = 'image' | 'video';
-type BusinessMediaItem = { url: string; type: BusinessMediaType; publicId?: string };
-
-function toMedia(b: { media?: unknown; images?: unknown }): BusinessMediaItem[] {
-  const mediaRaw = (b as { media?: unknown }).media;
-  if (Array.isArray(mediaRaw)) {
-    const cleaned = mediaRaw
-      .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
-      .map((m) => ({
-        url: typeof m.url === 'string' ? m.url.trim() : '',
-        type: m.type === 'video' ? ('video' as const) : ('image' as const),
-        publicId: typeof m.publicId === 'string' && m.publicId.trim() ? m.publicId.trim() : undefined,
+function toMedia(business: { media?: unknown; images?: unknown }): BusinessMediaItem[] {
+  if (Array.isArray(business.media)) {
+    const cleaned = business.media
+      .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+      .map((item) => ({
+        url: typeof item.url === "string" ? item.url.trim() : "",
+        type: item.type === "video" ? ("video" as const) : ("image" as const),
+        publicId:
+          typeof item.publicId === "string" && item.publicId.trim() ? item.publicId.trim() : undefined,
       }))
-      .filter((m) => !!m.url);
+      .filter((item) => item.url.length > 0);
     if (cleaned.length > 0) return cleaned;
   }
 
-  const imagesRaw = (b as { images?: unknown }).images;
-  if (Array.isArray(imagesRaw)) {
-    return imagesRaw
-      .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
-      .map((u) => ({ url: u.trim(), type: 'image' as const }));
+  if (Array.isArray(business.images)) {
+    return business.images
+      .filter((url): url is string => typeof url === "string" && url.trim().length > 0)
+      .map((url) => ({ url: url.trim(), type: "image" as const }));
   }
+
   return [];
 }
 
-function mediaToLegacyImages(media: BusinessMediaItem[]): string[] {
-  return Array.from(new Set(media.filter((m) => m.type === 'image').map((m) => m.url)));
+function servicesForResponse(business: { services?: string[] | string }): string[] {
+  const { services } = business;
+  if (Array.isArray(services)) return services;
+  if (typeof services === "string" && services.trim()) return [services.trim()];
+  return [];
 }
 
-/** Ensure services is always string[] for response (legacy DB may have string). */
-function servicesForResponse(b: { services?: string[] | string }): string[] {
-  const s = b.services;
-  if (Array.isArray(s)) return s;
-  if (typeof s === 'string' && s) return [s];
-  return [];
+function mapBusinessEntity(business: {
+  _id: unknown;
+  businessName: string;
+  services?: string[] | string;
+  serviceHours?: string;
+  businessDescription?: string;
+  businessType: string;
+  serviceAreas?: string;
+  media?: unknown;
+  images?: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+}): BusinessEntity {
+  const media = toMedia(business);
+  return {
+    id: String(business._id),
+    businessName: business.businessName,
+    services: servicesForResponse(business),
+    serviceHours: business.serviceHours ?? "",
+    businessDescription: business.businessDescription ?? "",
+    businessType: business.businessType,
+    serviceAreas: business.serviceAreas ?? "",
+    media,
+    images: mediaToLegacyImages(media),
+    createdAt: business.createdAt.toISOString(),
+    updatedAt: business.updatedAt.toISOString(),
+  };
 }
 
 /**
@@ -55,114 +84,99 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     if (!business) return apiNotFound('Business not found');
 
-    const media = toMedia(business);
-    return apiSuccess({
-      id: business._id,
-      ...business,
-      services: servicesForResponse(business),
-      media,
-      images: mediaToLegacyImages(media),
-    });
+    return apiSuccess<BusinessEntity>(mapBusinessEntity(business));
   } catch (err) {
-    console.error('Business fetch error:', err);
-    return apiError('Failed to fetch business', 'SERVER_ERROR', 500);
+    console.error("Business fetch error:", err);
+    return apiError("Failed to fetch business", "SERVER_ERROR", 500);
   }
 }
 
-/** Normalize services to array of 1–3 strings. */
-function normalizeServices(v: unknown): string[] | null {
-  if (v === undefined || v === null) return null;
-  if (Array.isArray(v)) {
-    const arr = v.filter((s) => typeof s === 'string').map((s) => String(s).trim()).filter(Boolean);
-    if (arr.length === 0) return null;
-    return arr.length > 3 ? arr.slice(0, 3) : arr;
+function applyBusinessUpdate(
+  current: { services?: string[] | string; media?: unknown; images?: unknown },
+  update: UpdateBusinessRequest
+): ValidationResult<Record<string, unknown>> {
+  const nextServicesResult = mergeServiceMutations(servicesForResponse(current), update);
+  if (!nextServicesResult.success || !nextServicesResult.data) {
+    return {
+      success: false,
+      error: nextServicesResult.error,
+      code: nextServicesResult.code,
+    };
   }
-  if (typeof v === 'string' && v.trim()) return [v.trim()];
-  return null;
+
+  const updateDoc: Record<string, unknown> = {
+    services: nextServicesResult.data,
+    updatedAt: new Date(),
+  };
+
+  if (update.businessName !== undefined) updateDoc.businessName = update.businessName;
+  if (update.businessType !== undefined) updateDoc.businessType = update.businessType;
+  if (update.serviceHours !== undefined) updateDoc.serviceHours = update.serviceHours;
+  if (update.businessDescription !== undefined) updateDoc.businessDescription = update.businessDescription;
+  if (update.serviceAreas !== undefined) updateDoc.serviceAreas = update.serviceAreas;
+  if (update.media !== undefined) {
+    updateDoc.media = update.media;
+    updateDoc.images = mediaToLegacyImages(update.media);
+  }
+
+  return { success: true, data: updateDoc };
 }
 
 /**
  * PUT /api/v1/business/:id
  * services: string[] (max 3) or single string
  */
-export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const authHeader = request.headers.get("Authorization");
+  const admin = await requireAdmin(authHeader);
+  if (!admin) return apiUnauthorized("Authentication required");
+
   try {
     const { id } = await params;
-    if (!mongoose.Types.ObjectId.isValid(id)) return apiNotFound('Business not found');
+    if (!mongoose.Types.ObjectId.isValid(id)) return apiNotFound("Business not found");
 
     await connectDB();
     const body = await request.json();
-    const {
-      businessName,
-      services: servicesRaw,
-      serviceHours,
-      businessDescription,
-      businessType,
-      serviceAreas,
-      images,
-      media,
-    } = body;
-
-    const services = normalizeServices(servicesRaw);
-    if (services !== null && services.length > 3) {
-      return apiError('Maximum 3 services allowed per business', 'VALIDATION_ERROR', 400);
+    const parsed = parseUpdateBusinessPayload(body);
+    if (!parsed.success || !parsed.data) {
+      return apiError(parsed.error ?? "Validation failed", parsed.code ?? "VALIDATION_ERROR", 400);
     }
 
-    const parsedMedia: BusinessMediaItem[] = Array.isArray(media)
-      ? media
-          .filter((m): m is Record<string, unknown> => !!m && typeof m === 'object')
-          .map((m) => ({
-            url: typeof m.url === 'string' ? m.url.trim() : '',
-            type: m.type === 'video' ? ('video' as const) : ('image' as const),
-            publicId: typeof m.publicId === 'string' && m.publicId.trim() ? m.publicId.trim() : undefined,
-          }))
-          .filter((m) => !!m.url)
-      : [];
+    const currentBusiness = await Business.findOne({ _id: id, deletedAt: null }).lean();
+    if (!currentBusiness) return apiNotFound("Business not found");
 
-    const legacyImages: string[] = Array.isArray(images)
-      ? images.filter((u): u is string => typeof u === 'string' && u.trim().length > 0).map((u) => u.trim())
-      : [];
-
-    const mediaFinal = parsedMedia.length > 0 ? parsedMedia : legacyImages.length > 0 ? legacyImages.map((u) => ({ url: u, type: 'image' as const })) : null;
+    const updateDocResult = applyBusinessUpdate(currentBusiness, parsed.data);
+    if (!updateDocResult.success || !updateDocResult.data) {
+      return apiError(updateDocResult.error ?? "Validation failed", updateDocResult.code ?? "VALIDATION_ERROR", 400);
+    }
 
     const business = await Business.findOneAndUpdate(
       { _id: id, deletedAt: null },
-      {
-        ...(businessName && { businessName }),
-        ...(services !== null && { services }),
-        ...(serviceHours !== undefined && { serviceHours }),
-        ...(businessDescription !== undefined && { businessDescription }),
-        ...(businessType && { businessType }),
-        ...(serviceAreas !== undefined && { serviceAreas }),
-        ...(mediaFinal !== null && { media: mediaFinal, images: mediaToLegacyImages(mediaFinal) }),
-        updatedAt: new Date(),
-      },
+      updateDocResult.data,
       { new: true }
     ).lean();
 
-    if (!business) return apiNotFound('Business not found');
+    if (!business) return apiNotFound("Business not found");
 
-    const outMedia = toMedia(business);
-    return apiSuccess({
-      id: business._id,
-      ...business,
-      services: servicesForResponse(business),
-      media: outMedia,
-      images: mediaToLegacyImages(outMedia),
-    });
+    return apiSuccess<BusinessEntity>(mapBusinessEntity(business), "Business updated successfully");
   } catch (err) {
-    console.error('Business update error:', err);
-    return apiError('Failed to update business', 'SERVER_ERROR', 500);
+    console.error("Business update error:", err);
+    return apiError("Failed to update business", "SERVER_ERROR", 500);
   }
 }
 
-/**
- * DELETE /api/v1/business/:id
- */
+export async function PUT(request: NextRequest, context: { params: Promise<{ id: string }> }) {
+  return PATCH(request, context);
+}
+
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const authHeader = request.headers.get("Authorization");
+  const admin = await requireAdmin(authHeader);
+  if (!admin) return apiUnauthorized("Authentication required");
+
   try {
     const { id } = await params;
-    if (!mongoose.Types.ObjectId.isValid(id)) return apiNotFound('Business not found');
+    if (!mongoose.Types.ObjectId.isValid(id)) return apiNotFound("Business not found");
 
     await connectDB();
     const business = await Business.findOneAndUpdate(
@@ -171,11 +185,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       { new: true }
     );
 
-    if (!business) return apiNotFound('Business not found');
+    if (!business) return apiNotFound("Business not found");
 
-    return apiSuccess({ message: 'Business deleted successfully' });
+    return apiSuccess({ id: String(business._id) }, "Business deleted successfully");
   } catch (err) {
-    console.error('Business delete error:', err);
-    return apiError('Failed to delete business', 'SERVER_ERROR', 500);
+    console.error("Business delete error:", err);
+    return apiError("Failed to delete business", "SERVER_ERROR", 500);
   }
 }
