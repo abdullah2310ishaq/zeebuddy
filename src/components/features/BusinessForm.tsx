@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/utils";
-import { apiFetch, apiUpload } from "@/lib/api-client";
+import { apiFetch } from "@/lib/api-client";
 import type { BusinessEntity, BusinessMediaItem, CreateBusinessRequest, UpdateBusinessRequest } from "@/types/business";
 
 type UploadKind = "image" | "video";
@@ -21,9 +21,21 @@ interface BusinessFormProps {
   onSuccess?: () => void;
 }
 
-interface UploadResponse {
-  url: string;
-  publicId: string;
+interface UploadSignatureResponse {
+  cloudName: string;
+  apiKey: string;
+  folder: string;
+  resourceType: UploadKind;
+  timestamp: number;
+  signature: string;
+  uploadUrl: string;
+  maxVideoDurationSec: number;
+}
+
+interface CloudinaryUploadResponse {
+  secure_url: string;
+  public_id: string;
+  duration?: number;
 }
 
 interface FieldErrors {
@@ -48,31 +60,103 @@ function getInitialMedia(business?: BusinessEntity | null): BusinessMediaItem[] 
   return (business.images ?? []).map((url) => ({ url, type: "image" as const }));
 }
 
+function getCloudinaryError(value: unknown): string {
+  if (!value || typeof value !== "object") return "Cloudinary upload failed";
+  const record = value as Record<string, unknown>;
+  const error = record.error;
+  if (error && typeof error === "object") {
+    const message = (error as Record<string, unknown>).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return "Cloudinary upload failed";
+}
+
+function isCloudinaryUploadResponse(value: unknown): value is CloudinaryUploadResponse {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.secure_url === "string" && typeof record.public_id === "string";
+}
+
+function formatDurationLimit(seconds: number): string {
+  if (seconds % 60 === 0) {
+    const minutes = seconds / 60;
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  }
+  return `${seconds} seconds`;
+}
+
+async function deleteUploadedMedia(publicId: string, type: UploadKind): Promise<void> {
+  const response = await apiFetch<{ publicId: string }>("/upload", {
+    method: "DELETE",
+    body: JSON.stringify({ publicId, type }),
+  });
+
+  if (!response.success) {
+    throw new Error(response.error || "Failed to delete invalid upload");
+  }
+}
+
+async function uploadMediaDirect(preview: MediaPreview): Promise<BusinessMediaItem> {
+  const signatureResponse = await apiFetch<UploadSignatureResponse>("/upload/signature", {
+    method: "POST",
+    body: JSON.stringify({ folder: "businesses", type: preview.kind }),
+  });
+
+  if (!signatureResponse.success || !signatureResponse.data) {
+    throw new Error(signatureResponse.error || `Failed to prepare upload for ${preview.file.name}`);
+  }
+
+  const signature = signatureResponse.data;
+  const uploadFormData = new FormData();
+  uploadFormData.append("file", preview.file);
+  uploadFormData.append("api_key", signature.apiKey);
+  uploadFormData.append("timestamp", String(signature.timestamp));
+  uploadFormData.append("signature", signature.signature);
+  uploadFormData.append("folder", signature.folder);
+
+  const uploadResponse = await fetch(signature.uploadUrl, {
+    method: "POST",
+    body: uploadFormData,
+  });
+  const uploadJson: unknown = await uploadResponse.json().catch(() => null);
+
+  if (!uploadResponse.ok) {
+    throw new Error(getCloudinaryError(uploadJson));
+  }
+
+  if (!isCloudinaryUploadResponse(uploadJson)) {
+    throw new Error("Cloudinary returned an invalid upload response");
+  }
+
+  if (
+    preview.kind === "video" &&
+    typeof uploadJson.duration === "number" &&
+    uploadJson.duration > signature.maxVideoDurationSec
+  ) {
+    await deleteUploadedMedia(uploadJson.public_id, "video").catch((error: unknown) => {
+      console.warn("[BusinessForm] Failed to delete oversized video:", error);
+    });
+    throw new Error(
+      `Video must be ${formatDurationLimit(signature.maxVideoDurationSec)} or less (current: ${Math.ceil(
+        uploadJson.duration
+      )}s)`
+    );
+  }
+
+  return {
+    url: uploadJson.secure_url,
+    type: preview.kind,
+    publicId: uploadJson.public_id,
+  };
+}
+
 async function uploadMediaBatched(mediaPreviews: MediaPreview[]): Promise<BusinessMediaItem[]> {
   const uploadedMedia: BusinessMediaItem[] = [];
   const batchSize = 3;
 
   for (let i = 0; i < mediaPreviews.length; i += batchSize) {
     const batch = mediaPreviews.slice(i, i + batchSize);
-    const uploadedBatch = await Promise.all(
-      batch.map(async (preview): Promise<BusinessMediaItem> => {
-        const uploadFormData = new FormData();
-        uploadFormData.append("file", preview.file);
-        uploadFormData.append("folder", "businesses");
-        uploadFormData.append("type", preview.kind);
-
-        const response = await apiUpload<UploadResponse>("/upload", uploadFormData);
-        if (!response.success || !response.data?.url) {
-          throw new Error(response.error || `Failed to upload ${preview.file.name}`);
-        }
-
-        return {
-          url: response.data.url,
-          type: preview.kind,
-          publicId: response.data.publicId,
-        };
-      })
-    );
+    const uploadedBatch = await Promise.all(batch.map((preview) => uploadMediaDirect(preview)));
     uploadedMedia.push(...uploadedBatch);
   }
 

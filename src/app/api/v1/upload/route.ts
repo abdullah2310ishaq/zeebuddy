@@ -1,14 +1,15 @@
 import { NextRequest } from 'next/server';
 import { uploadToCloudinary, deleteFromCloudinary, type CloudinaryFolder } from '@/lib/cloudinary';
 import { apiSuccess, apiError } from '@/lib/api-response';
+import { requireAdmin } from '@/lib/auth';
 
-const MAX_VIDEO_DURATION_SEC = 60;
+const MAX_VIDEO_DURATION_SEC = 120;
 
 /**
  * POST /api/v1/upload
  * Upload image or video to Cloudinary
  * FormData: file (required), folder (posts|businesses|avatars|events), type (image|video)
- * Videos: max 1 minute duration
+ * Videos: max 120 seconds duration
  */
 export async function POST(request: NextRequest) {
   try {
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
 
     if (type === 'video' && result.duration != null && result.duration > MAX_VIDEO_DURATION_SEC) {
       await deleteFromCloudinary(result.publicId, 'video');
-      return apiError(`Video must be 1 minute or less (current: ${Math.ceil(result.duration)}s)`, 'VIDEO_TOO_LONG', 400);
+      return apiError(`Video must be 120 seconds or less (current: ${Math.ceil(result.duration)}s)`, 'VIDEO_TOO_LONG', 400);
     }
 
     return apiSuccess(
@@ -71,5 +72,27 @@ export async function POST(request: NextRequest) {
       console.error('[Upload] Error object:', JSON.stringify(err, null, 2));
     }
     return apiError(message, 'SERVER_ERROR', 500);
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  const admin = await requireAdmin(request.headers.get('Authorization'));
+  if (!admin) return apiError('Authentication required', 'UNAUTHORIZED', 401);
+
+  try {
+    const body: unknown = await request.json().catch(() => null);
+    const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+    const publicId = typeof record.publicId === 'string' ? record.publicId.trim() : '';
+    const resourceType = record.type === 'video' ? 'video' : 'image';
+
+    if (!publicId) {
+      return apiError('publicId is required', 'VALIDATION_ERROR', 400);
+    }
+
+    await deleteFromCloudinary(publicId, resourceType);
+    return apiSuccess({ publicId }, 'Media deleted');
+  } catch (err) {
+    console.error('[Upload Delete] Error:', err);
+    return apiError('Failed to delete media', 'SERVER_ERROR', 500);
   }
 }
