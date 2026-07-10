@@ -37,17 +37,36 @@ function normalizeServices(value: unknown): string[] {
   );
 }
 
+export function mapBusinessMediaItem(item: Record<string, unknown>): BusinessMediaItem | null {
+  const url = cleanString(item.url);
+  if (!url) return null;
+
+  const type = item.type === "video" ? ("video" as const) : ("image" as const);
+  const mediaItem: BusinessMediaItem = {
+    url,
+    type,
+    publicId: cleanString(item.publicId) || undefined,
+  };
+
+  if (type === "video") {
+    const title = cleanString(item.title);
+    const thumbnailUrl = cleanString(item.thumbnailUrl);
+    const thumbnailPublicId = cleanString(item.thumbnailPublicId);
+    if (title) mediaItem.title = title;
+    if (thumbnailUrl) mediaItem.thumbnailUrl = thumbnailUrl;
+    if (thumbnailPublicId) mediaItem.thumbnailPublicId = thumbnailPublicId;
+  }
+
+  return mediaItem;
+}
+
 function parseMedia(value: unknown): BusinessMediaItem[] {
   if (!Array.isArray(value)) return [];
 
   return value
     .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
-    .map((item) => ({
-      url: cleanString(item.url),
-      type: item.type === "video" ? ("video" as const) : ("image" as const),
-      publicId: cleanString(item.publicId) || undefined,
-    }))
-    .filter((item) => item.url.length > 0);
+    .map(mapBusinessMediaItem)
+    .filter((item): item is BusinessMediaItem => item !== null);
 }
 
 export function parseCreateBusinessPayload(payload: unknown): ValidationResult<CreateBusinessRequest> {

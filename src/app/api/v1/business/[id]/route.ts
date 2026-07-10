@@ -5,6 +5,7 @@ import { Business } from "@/models";
 import { requireAdmin } from "@/lib/auth";
 import { apiSuccess, apiError, apiNotFound, apiUnauthorized } from "@/lib/api-response";
 import {
+  mapBusinessMediaItem,
   mediaToLegacyImages,
   mergeServiceMutations,
   parseUpdateBusinessPayload,
@@ -16,13 +17,8 @@ function toMedia(business: { media?: unknown; images?: unknown }): BusinessMedia
   if (Array.isArray(business.media)) {
     const cleaned = business.media
       .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
-      .map((item) => ({
-        url: typeof item.url === "string" ? item.url.trim() : "",
-        type: item.type === "video" ? ("video" as const) : ("image" as const),
-        publicId:
-          typeof item.publicId === "string" && item.publicId.trim() ? item.publicId.trim() : undefined,
-      }))
-      .filter((item) => item.url.length > 0);
+      .map(mapBusinessMediaItem)
+      .filter((item): item is BusinessMediaItem => item !== null);
     if (cleaned.length > 0) return cleaned;
   }
 

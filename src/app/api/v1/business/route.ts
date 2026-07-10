@@ -3,20 +3,15 @@ import { connectDB } from "@/lib/db";
 import { Business } from "@/models";
 import { requireAdmin } from "@/lib/auth";
 import { apiSuccess, apiError, apiUnauthorized } from "@/lib/api-response";
-import { mediaToLegacyImages, parseCreateBusinessPayload } from "@/lib/validation/business";
+import { mapBusinessMediaItem, mediaToLegacyImages, parseCreateBusinessPayload } from "@/lib/validation/business";
 import type { BusinessEntity, BusinessMediaItem } from "@/types/business";
 
 function toMedia(b: { media?: unknown; images?: unknown }): BusinessMediaItem[] {
   if (Array.isArray(b.media)) {
     const cleaned = b.media
       .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
-      .map((item) => ({
-        url: typeof item.url === "string" ? item.url.trim() : "",
-        type: item.type === "video" ? ("video" as const) : ("image" as const),
-        publicId:
-          typeof item.publicId === "string" && item.publicId.trim() ? item.publicId.trim() : undefined,
-      }))
-      .filter((item) => item.url.length > 0);
+      .map(mapBusinessMediaItem)
+      .filter((item): item is BusinessMediaItem => item !== null);
     if (cleaned.length > 0) return cleaned;
   }
 

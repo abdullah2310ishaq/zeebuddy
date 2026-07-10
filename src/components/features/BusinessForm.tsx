@@ -14,6 +14,16 @@ interface MediaPreview {
   url: string;
   file: File;
   kind: UploadKind;
+  title?: string;
+  thumbnailFile?: File;
+  thumbnailPreviewUrl?: string;
+  thumbnailUrl?: string;
+  thumbnailPublicId?: string;
+}
+
+interface EditableMediaItem extends BusinessMediaItem {
+  pendingThumbnailFile?: File;
+  pendingThumbnailPreviewUrl?: string;
 }
 
 interface BusinessFormProps {
@@ -96,6 +106,68 @@ async function deleteUploadedMedia(publicId: string, type: UploadKind): Promise<
   }
 }
 
+async function uploadImageFile(file: File): Promise<{ url: string; publicId: string }> {
+  const preview: MediaPreview = {
+    url: URL.createObjectURL(file),
+    file,
+    kind: "image",
+  };
+  try {
+    const uploaded = await uploadMediaDirect(preview);
+    return { url: uploaded.url, publicId: uploaded.publicId ?? "" };
+  } finally {
+    URL.revokeObjectURL(preview.url);
+  }
+}
+
+async function attachVideoMetadata(preview: MediaPreview, base: BusinessMediaItem): Promise<BusinessMediaItem> {
+  if (preview.kind !== "video") return base;
+
+  const item: BusinessMediaItem = { ...base };
+  const title = preview.title?.trim();
+  if (title) item.title = title;
+
+  if (preview.thumbnailFile) {
+    const thumbnail = await uploadImageFile(preview.thumbnailFile);
+    item.thumbnailUrl = thumbnail.url;
+    item.thumbnailPublicId = thumbnail.publicId || undefined;
+  } else if (preview.thumbnailUrl) {
+    item.thumbnailUrl = preview.thumbnailUrl;
+    if (preview.thumbnailPublicId) item.thumbnailPublicId = preview.thumbnailPublicId;
+  }
+
+  return item;
+}
+
+async function finalizeExistingMediaItem(item: EditableMediaItem): Promise<BusinessMediaItem> {
+  const { pendingThumbnailFile, pendingThumbnailPreviewUrl, ...rest } = item;
+  if (pendingThumbnailPreviewUrl) URL.revokeObjectURL(pendingThumbnailPreviewUrl);
+
+  let finalized: BusinessMediaItem = { ...rest };
+  const title = finalized.title?.trim();
+  if (title) finalized.title = title;
+  else delete finalized.title;
+
+  if (finalized.type === "video" && pendingThumbnailFile) {
+    if (finalized.thumbnailPublicId) {
+      await deleteUploadedMedia(finalized.thumbnailPublicId, "image").catch((error: unknown) => {
+        console.warn("[BusinessForm] Failed to delete replaced thumbnail:", error);
+      });
+    }
+    const thumbnail = await uploadImageFile(pendingThumbnailFile);
+    finalized.thumbnailUrl = thumbnail.url;
+    finalized.thumbnailPublicId = thumbnail.publicId || undefined;
+  }
+
+  if (finalized.type !== "video") {
+    delete finalized.title;
+    delete finalized.thumbnailUrl;
+    delete finalized.thumbnailPublicId;
+  }
+
+  return finalized;
+}
+
 async function uploadMediaDirect(preview: MediaPreview): Promise<BusinessMediaItem> {
   const signatureResponse = await apiFetch<UploadSignatureResponse>("/upload/signature", {
     method: "POST",
@@ -150,17 +222,84 @@ async function uploadMediaDirect(preview: MediaPreview): Promise<BusinessMediaIt
   };
 }
 
+async function uploadPreviewWithMetadata(preview: MediaPreview): Promise<BusinessMediaItem> {
+  const base = await uploadMediaDirect(preview);
+  return attachVideoMetadata(preview, base);
+}
+
 async function uploadMediaBatched(mediaPreviews: MediaPreview[]): Promise<BusinessMediaItem[]> {
   const uploadedMedia: BusinessMediaItem[] = [];
   const batchSize = 3;
 
   for (let i = 0; i < mediaPreviews.length; i += batchSize) {
     const batch = mediaPreviews.slice(i, i + batchSize);
-    const uploadedBatch = await Promise.all(batch.map((preview) => uploadMediaDirect(preview)));
+    const uploadedBatch = await Promise.all(batch.map((preview) => uploadPreviewWithMetadata(preview)));
     uploadedMedia.push(...uploadedBatch);
   }
 
   return uploadedMedia;
+}
+
+interface VideoMetadataEditorProps {
+  title?: string;
+  thumbnailUrl?: string;
+  onTitleChange: (title: string) => void;
+  onThumbnailSelect: (file: File) => void;
+  onThumbnailRemove: () => void;
+}
+
+function VideoMetadataEditor({
+  title,
+  thumbnailUrl,
+  onTitleChange,
+  onThumbnailSelect,
+  onThumbnailRemove,
+}: VideoMetadataEditorProps) {
+  const thumbnailInputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div className="mt-2 space-y-2 rounded-lg bg-gray-50 p-2">
+      <input
+        type="text"
+        value={title ?? ""}
+        onChange={(event) => onTitleChange(event.target.value)}
+        placeholder="Video title (optional)"
+        className="w-full h-9 px-3 bg-white border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-red-600 text-xs"
+      />
+      {thumbnailUrl ? (
+        <div className="flex items-center gap-2">
+          <div className="relative h-14 w-20 rounded overflow-hidden border border-gray-300">
+            <img src={thumbnailUrl} alt="Video thumbnail" className="w-full h-full object-cover" />
+          </div>
+          <button
+            type="button"
+            onClick={onThumbnailRemove}
+            className="text-xs text-red-600 hover:text-red-700 font-medium"
+          >
+            Remove thumbnail
+          </button>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => thumbnailInputRef.current?.click()}
+        className="w-full h-9 border border-dashed border-gray-400 rounded-lg text-xs font-medium text-gray-700 hover:bg-white transition-colors"
+      >
+        {thumbnailUrl ? "Change thumbnail" : "Add thumbnail (optional)"}
+      </button>
+      <input
+        ref={thumbnailInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) onThumbnailSelect(file);
+          event.target.value = "";
+        }}
+      />
+    </div>
+  );
 }
 
 export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
@@ -175,7 +314,7 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
   const [serviceAreas, setServiceAreas] = useState<string>(business?.serviceAreas ?? "");
   const [selectedBusinessType, setSelectedBusinessType] = useState<string>(business?.businessType ?? "");
   const [selectedServices, setSelectedServices] = useState<string[]>(business?.services ?? []);
-  const [existingMedia, setExistingMedia] = useState<BusinessMediaItem[]>(() => getInitialMedia(business));
+  const [existingMedia, setExistingMedia] = useState<EditableMediaItem[]>(() => getInitialMedia(business));
   const [mediaPreviews, setMediaPreviews] = useState<MediaPreview[]>([]);
   const [submitMessage, setSubmitMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
@@ -209,8 +348,9 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const finalizedExisting = await Promise.all(existingMedia.map((item) => finalizeExistingMediaItem(item)));
       const uploadedMedia = await uploadMediaBatched(mediaPreviews);
-      const mergedMedia = dedupeMedia([...existingMedia, ...uploadedMedia]);
+      const mergedMedia = dedupeMedia([...finalizedExisting, ...uploadedMedia]);
 
       const payloadBase = {
         businessName: businessName.trim(),
@@ -241,6 +381,7 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
     onSuccess: (savedBusiness) => {
       for (const preview of mediaPreviews) {
         URL.revokeObjectURL(preview.url);
+        if (preview.thumbnailPreviewUrl) URL.revokeObjectURL(preview.thumbnailPreviewUrl);
       }
 
       setMediaPreviews([]);
@@ -373,13 +514,110 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
     setMediaPreviews((prev) => {
       const next = [...prev];
       const [removed] = next.splice(index, 1);
-      if (removed) URL.revokeObjectURL(removed.url);
+      if (removed) {
+        URL.revokeObjectURL(removed.url);
+        if (removed.thumbnailPreviewUrl) URL.revokeObjectURL(removed.thumbnailPreviewUrl);
+      }
       return next;
     });
   };
 
   const handleRemoveExistingMedia = (index: number) => {
+    const item = existingMedia[index];
+    if (item?.thumbnailPublicId) {
+      deleteUploadedMedia(item.thumbnailPublicId, "image").catch((error: unknown) => {
+        console.warn("[BusinessForm] Failed to delete thumbnail:", error);
+      });
+    }
+    if (item?.pendingThumbnailPreviewUrl) URL.revokeObjectURL(item.pendingThumbnailPreviewUrl);
+
     setExistingMedia((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  const handleExistingVideoTitleChange = (index: number, title: string) => {
+    setExistingMedia((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], title };
+      return next;
+    });
+  };
+
+  const handleExistingVideoThumbnailSelect = (index: number, file: File) => {
+    const previewUrl = URL.createObjectURL(file);
+    setExistingMedia((prev) => {
+      const next = [...prev];
+      const current = next[index];
+      if (current?.pendingThumbnailPreviewUrl) URL.revokeObjectURL(current.pendingThumbnailPreviewUrl);
+      next[index] = {
+        ...next[index],
+        pendingThumbnailFile: file,
+        pendingThumbnailPreviewUrl: previewUrl,
+      };
+      return next;
+    });
+  };
+
+  const handleExistingVideoThumbnailRemove = (index: number) => {
+    const item = existingMedia[index];
+    if (item?.thumbnailPublicId) {
+      deleteUploadedMedia(item.thumbnailPublicId, "image").catch((error: unknown) => {
+        console.warn("[BusinessForm] Failed to delete thumbnail:", error);
+      });
+    }
+    if (item?.pendingThumbnailPreviewUrl) URL.revokeObjectURL(item.pendingThumbnailPreviewUrl);
+
+    setExistingMedia((prev) => {
+      const next = [...prev];
+      next[index] = {
+        ...next[index],
+        thumbnailUrl: undefined,
+        thumbnailPublicId: undefined,
+        pendingThumbnailFile: undefined,
+        pendingThumbnailPreviewUrl: undefined,
+      };
+      return next;
+    });
+  };
+
+  const handlePreviewVideoTitleChange = (index: number, title: string) => {
+    setMediaPreviews((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], title };
+      return next;
+    });
+  };
+
+  const handlePreviewVideoThumbnailSelect = (index: number, file: File) => {
+    const previewUrl = URL.createObjectURL(file);
+    setMediaPreviews((prev) => {
+      const next = [...prev];
+      const current = next[index];
+      if (current?.thumbnailPreviewUrl) URL.revokeObjectURL(current.thumbnailPreviewUrl);
+      next[index] = {
+        ...next[index],
+        thumbnailFile: file,
+        thumbnailPreviewUrl: previewUrl,
+        thumbnailUrl: undefined,
+        thumbnailPublicId: undefined,
+      };
+      return next;
+    });
+  };
+
+  const handlePreviewVideoThumbnailRemove = (index: number) => {
+    setMediaPreviews((prev) => {
+      const next = [...prev];
+      const current = next[index];
+      if (current?.thumbnailPreviewUrl) URL.revokeObjectURL(current.thumbnailPreviewUrl);
+      next[index] = {
+        ...next[index],
+        thumbnailFile: undefined,
+        thumbnailPreviewUrl: undefined,
+        thumbnailUrl: undefined,
+        thumbnailPublicId: undefined,
+      };
+      return next;
+    });
   };
 
   return (
@@ -591,44 +829,60 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
             {existingMedia.length > 0 && (
               <div className="mb-4">
                 <p className="text-sm text-gray-600 mb-2">Existing Media:</p>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {existingMedia.map((item, index) => (
-                    <div
-                      key={index}
-                      className="relative group aspect-square rounded-xl overflow-hidden border-2 border-gray-300"
-                    >
-                      {item.type === "video" ? (
-                        <video
-                          src={item.url}
-                          className="w-full h-full object-cover"
-                          controls
-                        />
-                      ) : (
-                        <img
-                          src={item.url}
-                          alt={`Existing ${index + 1}`}
-                          className="w-full h-full object-cover"
+                    <div key={index} className="space-y-0">
+                      <div className="relative group aspect-square rounded-xl overflow-hidden border-2 border-gray-300">
+                        {item.type === "video" ? (
+                          item.thumbnailUrl || item.pendingThumbnailPreviewUrl ? (
+                            <img
+                              src={item.pendingThumbnailPreviewUrl ?? item.thumbnailUrl}
+                              alt={item.title || `Video ${index + 1}`}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <video
+                              src={item.url}
+                              className="w-full h-full object-cover"
+                              controls
+                            />
+                          )
+                        ) : (
+                          <img
+                            src={item.url}
+                            alt={`Existing ${index + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveExistingMedia(index)}
+                          className="absolute top-2 right-2 w-8 h-8 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        >
+                          <svg
+                            className="w-4 h-4 text-white"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M6 18L18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                      {item.type === "video" && (
+                        <VideoMetadataEditor
+                          title={item.title}
+                          thumbnailUrl={item.pendingThumbnailPreviewUrl ?? item.thumbnailUrl}
+                          onTitleChange={(title) => handleExistingVideoTitleChange(index, title)}
+                          onThumbnailSelect={(file) => handleExistingVideoThumbnailSelect(index, file)}
+                          onThumbnailRemove={() => handleExistingVideoThumbnailRemove(index)}
                         />
                       )}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveExistingMedia(index)}
-                        className="absolute top-2 right-2 w-8 h-8 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                      >
-                        <svg
-                          className="w-4 h-4 text-white"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M6 18L18 6M6 6l12 12"
-                          />
-                        </svg>
-                      </button>
                     </div>
                   ))}
                 </div>
@@ -661,45 +915,60 @@ export function BusinessForm({ business, onSuccess }: BusinessFormProps = {}) {
             ) : (
               <div className="space-y-4">
                 {/* Media Grid */}
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {mediaPreviews.map((preview, index) => (
-                    <div
-                      key={index}
-                      className="relative group aspect-square rounded-xl overflow-hidden border-2 border-red-600"
-                    >
-                      {preview.kind === "video" ? (
-                        <video
-                          src={preview.url}
-                          className="w-full h-full object-cover"
-                          controls
-                        />
-                      ) : (
-                        <img
-                          src={preview.url}
-                          alt={`Uploaded ${index + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-                      )}
-                      {/* Remove Button */}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveMediaPreview(index)}
-                        className="absolute top-2 right-2 w-8 h-8 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                      >
-                        <svg
-                          className="w-4 h-4 text-white"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M6 18L18 6M6 6l12 12"
+                    <div key={index} className="space-y-1">
+                      <div className="relative group aspect-square rounded-xl overflow-hidden border-2 border-red-600">
+                        {preview.kind === "video" ? (
+                          preview.thumbnailPreviewUrl ? (
+                            <img
+                              src={preview.thumbnailPreviewUrl}
+                              alt={preview.title || `Video ${index + 1}`}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <video
+                              src={preview.url}
+                              className="w-full h-full object-cover"
+                              controls
+                            />
+                          )
+                        ) : (
+                          <img
+                            src={preview.url}
+                            alt={`Uploaded ${index + 1}`}
+                            className="w-full h-full object-cover"
                           />
-                        </svg>
-                      </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveMediaPreview(index)}
+                          className="absolute top-2 right-2 w-8 h-8 bg-red-600 hover:bg-red-700 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        >
+                          <svg
+                            className="w-4 h-4 text-white"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M6 18L18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                      {preview.kind === "video" ? (
+                        <VideoMetadataEditor
+                          title={preview.title}
+                          thumbnailUrl={preview.thumbnailPreviewUrl}
+                          onTitleChange={(value) => handlePreviewVideoTitleChange(index, value)}
+                          onThumbnailSelect={(file) => handlePreviewVideoThumbnailSelect(index, file)}
+                          onThumbnailRemove={() => handlePreviewVideoThumbnailRemove(index)}
+                        />
+                      ) : null}
                     </div>
                   ))}
                 </div>
