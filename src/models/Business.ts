@@ -16,6 +16,9 @@ export interface IBusiness extends Document {
     url: string;
     type: 'image' | 'video';
     publicId?: string;
+    title?: string;
+    thumbnailUrl?: string;
+    thumbnailPublicId?: string;
   }>;
   /**
    * Legacy images-only list. Kept for older clients.
@@ -52,6 +55,9 @@ const BusinessSchema = new Schema<IBusiness>(
             url: { type: String, required: true },
             type: { type: String, enum: ['image', 'video'], required: true },
             publicId: { type: String, default: '' },
+            title: { type: String, default: '' },
+            thumbnailUrl: { type: String, default: '' },
+            thumbnailPublicId: { type: String, default: '' },
           },
           { _id: false }
         ),

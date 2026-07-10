@@ -4,6 +4,9 @@ export interface BusinessMediaItem {
   url: string;
   type: BusinessMediaType;
   publicId?: string;
+  title?: string;
+  thumbnailUrl?: string;
+  thumbnailPublicId?: string;
 }
 
 export interface BusinessEntity {

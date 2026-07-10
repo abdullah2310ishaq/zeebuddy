@@ -16,7 +16,14 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 const APP_GRADIENT = `linear-gradient(135deg, ${COLORS.GRADIENT_START} 0%, ${COLORS.GRADIENT_END} 100%)`;
 
 type BusinessMediaType = "image" | "video";
-type BusinessMediaItem = { url: string; type: BusinessMediaType; publicId?: string };
+type BusinessMediaItem = {
+  url: string;
+  type: BusinessMediaType;
+  publicId?: string;
+  title?: string;
+  thumbnailUrl?: string;
+  thumbnailPublicId?: string;
+};
 
 function toMedia(business: unknown): BusinessMediaItem[] {
   if (!business || typeof business !== "object") return [];
@@ -29,6 +36,13 @@ function toMedia(business: unknown): BusinessMediaItem[] {
         url: typeof m.url === "string" ? m.url.trim() : "",
         type: m.type === "video" ? ("video" as const) : ("image" as const),
         publicId: typeof m.publicId === "string" && m.publicId.trim() ? m.publicId.trim() : undefined,
+        title: typeof m.title === "string" && m.title.trim() ? m.title.trim() : undefined,
+        thumbnailUrl:
+          typeof m.thumbnailUrl === "string" && m.thumbnailUrl.trim() ? m.thumbnailUrl.trim() : undefined,
+        thumbnailPublicId:
+          typeof m.thumbnailPublicId === "string" && m.thumbnailPublicId.trim()
+            ? m.thumbnailPublicId.trim()
+            : undefined,
       }))
       .filter((m) => !!m.url);
   }
@@ -222,17 +236,25 @@ export default function LocalBusinessDetailPage() {
                             type="button"
                             onClick={() => setActiveGalleryItem(item)}
                             className={item.type === "video"
-                              ? "rounded-xl overflow-hidden bg-black aspect-video cursor-pointer"
+                              ? "rounded-xl overflow-hidden bg-black aspect-video cursor-pointer flex flex-col"
                               : "aspect-square rounded-xl overflow-hidden bg-gray-100 cursor-pointer"}
                           >
                             {item.type === "video" ? (
-                              <video
-                                src={item.url}
-                                className="w-full h-full object-contain"
-                                muted
-                                playsInline
-                                preload="metadata"
-                              />
+                              item.thumbnailUrl ? (
+                                <img
+                                  src={item.thumbnailUrl}
+                                  alt={item.title || `Video ${i + 1}`}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <video
+                                  src={item.url}
+                                  className="w-full h-full object-contain"
+                                  muted
+                                  playsInline
+                                  preload="metadata"
+                                />
+                              )
                             ) : (
                               <img
                                 src={item.url}
@@ -240,6 +262,11 @@ export default function LocalBusinessDetailPage() {
                                 className="w-full h-full object-cover"
                               />
                             )}
+                            {item.type === "video" && item.title ? (
+                              <span className="px-2 py-1 text-xs font-medium text-white bg-black/70 truncate">
+                                {item.title}
+                              </span>
+                            ) : null}
                           </button>
                         ))}
                       </div>
@@ -329,13 +356,21 @@ export default function LocalBusinessDetailPage() {
           </button>
 
           {activeGalleryItem.type === "video" ? (
-            <video
-              src={activeGalleryItem.url}
-              className="w-full max-h-[90vh] object-contain"
-              controls
-              autoPlay
-              playsInline
-            />
+            <div className="flex flex-col">
+              {activeGalleryItem.title ? (
+                <div className="px-4 py-2 text-sm font-semibold text-white bg-black/80">
+                  {activeGalleryItem.title}
+                </div>
+              ) : null}
+              <video
+                src={activeGalleryItem.url}
+                className="w-full max-h-[90vh] object-contain"
+                controls
+                autoPlay
+                playsInline
+                poster={activeGalleryItem.thumbnailUrl}
+              />
+            </div>
           ) : (
             <img
               src={activeGalleryItem.url}
