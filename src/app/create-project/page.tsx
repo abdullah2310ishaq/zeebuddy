@@ -8,7 +8,7 @@ import { MainContent } from '@/components/layout/MainContent';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { MobileSidebar } from '@/components/layout/MobileSidebar';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-import { apiFetch, apiUpload } from '@/lib/api-client';
+import { apiFetch } from '@/lib/api-client';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 
@@ -16,6 +16,97 @@ interface MediaItem {
   url: string;
   type: 'image' | 'video';
   publicId?: string;
+}
+
+type UploadKind = 'image' | 'video';
+type UploadFolder = 'posts' | 'events';
+
+interface UploadSignatureResponse {
+  apiKey: string;
+  folder: string;
+  timestamp: number;
+  signature: string;
+  uploadUrl: string;
+  maxVideoDurationSec: number;
+}
+
+interface CloudinaryUploadResponse {
+  secure_url: string;
+  public_id: string;
+  duration?: number;
+}
+
+function getCloudinaryError(value: unknown): string {
+  if (!value || typeof value !== 'object') return 'Cloudinary upload failed';
+  const error = (value as Record<string, unknown>).error;
+  if (error && typeof error === 'object') {
+    const message = (error as Record<string, unknown>).message;
+    if (typeof message === 'string' && message.trim()) return message;
+  }
+  return 'Cloudinary upload failed';
+}
+
+function isCloudinaryUploadResponse(value: unknown): value is CloudinaryUploadResponse {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.secure_url === 'string' && typeof record.public_id === 'string';
+}
+
+async function deleteUploadedMedia(publicId: string, type: UploadKind): Promise<void> {
+  const response = await apiFetch('/upload', {
+    method: 'DELETE',
+    body: JSON.stringify({ publicId, type }),
+  });
+  if (!response.success) throw new Error(response.error || 'Failed to delete invalid upload');
+}
+
+async function uploadMediaDirect(file: File, folder: UploadFolder, type: UploadKind): Promise<MediaItem> {
+  const signatureResponse = await apiFetch<UploadSignatureResponse>('/upload/signature', {
+    method: 'POST',
+    body: JSON.stringify({ folder, type }),
+  });
+
+  if (!signatureResponse.success || !signatureResponse.data) {
+    throw new Error(signatureResponse.error || `Failed to prepare upload for ${file.name}`);
+  }
+
+  const signature = signatureResponse.data;
+  const uploadFormData = new FormData();
+  uploadFormData.append('file', file);
+  uploadFormData.append('api_key', signature.apiKey);
+  uploadFormData.append('timestamp', String(signature.timestamp));
+  uploadFormData.append('signature', signature.signature);
+  uploadFormData.append('folder', signature.folder);
+
+  const uploadResponse = await fetch(signature.uploadUrl, {
+    method: 'POST',
+    body: uploadFormData,
+  });
+  const uploadJson: unknown = await uploadResponse.json().catch(() => null);
+
+  if (!uploadResponse.ok) throw new Error(getCloudinaryError(uploadJson));
+  if (!isCloudinaryUploadResponse(uploadJson)) {
+    throw new Error('Cloudinary returned an invalid upload response');
+  }
+
+  if (
+    type === 'video' &&
+    typeof uploadJson.duration === 'number' &&
+    uploadJson.duration > signature.maxVideoDurationSec
+  ) {
+    await deleteUploadedMedia(uploadJson.public_id, 'video').catch((error: unknown) => {
+      console.warn('[CreateProject] Failed to delete oversized video:', error);
+    });
+    throw new Error(
+      `Video must be ${signature.maxVideoDurationSec} seconds or less (current: ${Math.ceil(uploadJson.duration)}s)`
+    );
+  }
+
+  return {
+    url: uploadJson.secure_url,
+    type,
+    publicId: uploadJson.public_id,
+  };
 }
 
 interface Category {
@@ -85,28 +176,17 @@ export default function CreateProjectPage() {
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const type = file.type.startsWith('video/') ? 'video' : 'image';
+      const type: UploadKind = file.type.startsWith('video/') ? 'video' : 'image';
 
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('folder', folder);
-      formData.append('type', type);
-
-      const res = await apiUpload<{ url: string; publicId: string }>('/upload', formData);
-
-      if (res.success && res.data) {
-        const item: MediaItem = {
-          url: res.data!.url,
-          type: type as 'image' | 'video',
-          publicId: res.data!.publicId,
-        };
+      try {
+        const item = await uploadMediaDirect(file, folder, type);
         if (target === 'event') {
           setEventMedia((prev) => [...prev, item]);
         } else {
           setMedia((prev) => [...prev, item]);
         }
-      } else {
-        setError(res.error || 'Upload failed');
+      } catch (uploadError) {
+        setError(uploadError instanceof Error ? uploadError.message : 'Upload failed');
         break;
       }
     }
